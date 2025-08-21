@@ -1,13 +1,23 @@
+import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.v1.api import api_router
+from app.db.init_db import create_tables
+from app.core.scheduler import cleanup_task
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     description="Appraisal Report Management System API"
 )
+
+# Initialize database tables on startup
+@app.on_event("startup")
+async def startup_event():
+    create_tables()
+    # Start background cleanup task
+    asyncio.create_task(cleanup_task())
 
 # CORS middleware
 app.add_middleware(

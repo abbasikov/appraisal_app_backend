@@ -1,75 +1,66 @@
 # Appraisal App Backend
 
-FastAPI backend for the Appraisal Report Management System.
+FastAPI backend with JWT authentication and email verification.
 
-## Setup
+## Quick Start
 
-1. Create virtual environment:
 ```bash
+# Setup
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-2. Install dependencies:
-```bash
+source venv/bin/activate
 pip install -r requirements.txt
-```
 
-3. Set up environment variables:
-```bash
-cp .env.example .env
-# Edit .env with your database and secret key configuration
-```
-
-4. Set up PostgreSQL database:
-```bash
-# Create database
+# Database
 createdb appraisal_db
-```
+python migrate_db.py
 
-5. Run the application:
-```bash
+# Create admin
+python create_admin.py
+
+# Run
 python main.py
 ```
 
-## API Documentation
+Server runs at: http://localhost:8000
 
-Once running, visit:
+## Environment Setup
+
+Copy `.env.example` to `.env` and configure:
+```env
+DATABASE_URL=postgresql://postgres:12345@localhost/appraisal_db
+SECRET_KEY=your-secret-key
+SMTP_USERNAME=your-email@gmail.com
+SMTP_PASSWORD=your-app-password
+SMTP_FROM_EMAIL=your-email@gmail.com
+```
+
+## Features
+
+- **Authentication**: JWT tokens, email verification with 6-digit codes
+- **User Roles**: Admin (no verification), Appraiser, Client (verification required)
+- **Email System**: SMTP integration with rate limiting
+- **Security**: Password hashing, token expiration, role-based access
+
+## API Endpoints
+
+### Authentication
+- `POST /api/v1/auth/signup` - User registration
+- `POST /api/v1/auth/signin` - Login (username or email)
+- `POST /api/v1/auth/verify-email` - Email verification
+- `POST /api/v1/auth/password-reset` - Password reset
+
+### User Management
+- `GET /api/v1/auth/me` - Current user info
+- `GET /api/v1/users/profile` - User profile
+
+## Admin Account
+
+Admin accounts bypass email verification and have full access:
+```bash
+python create_admin.py  # Interactive creation
+```
+
+## Documentation
+
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
-- Health Check: http://localhost:8000/
-
-## Available Endpoints
-
-- `/api/v1/users` - User management
-- `/api/v1/properties` - Property data
-- `/api/v1/appraisals` - Appraisal workflows
-- `/api/v1/reports` - Report generation
-
-## Project Structure
-
-```
-app/
-├── api/v1/
-│   ├── endpoints/   # API route handlers
-│   └── api.py       # Main API router
-├── core/            # Core configuration
-├── models/          # SQLAlchemy models
-├── schemas/         # Pydantic schemas
-├── services/        # Business logic
-├── utils/           # Utility functions
-└── db/              # Database configuration
-```
-
-## Environment Variables
-
-Required variables in `.env`:
-- `SECRET_KEY` - JWT secret key
-- `DATABASE_URL` - PostgreSQL connection string
-- `ALLOWED_HOSTS` - CORS allowed origins
-
-## Development
-
-- Use `uvicorn main:app --reload` for auto-reload during development
-- Run tests with `pytest`
-- Format code with `black` and `isort`
