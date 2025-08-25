@@ -1,11 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import timedelta
+from sqlalchemy.sql import func
 from app.db.database import get_db
 from app.schemas.user import (
     UserCreate, UserLogin, Token, UserResponse, PasswordReset, 
     PasswordResetConfirm, EmailVerification, ResendVerification, VerificationStatus
 )
+from app.schemas.otp import LoginMFARequest
+from app.services.otp_service import OTPService
 from app.services.user_service import UserService
 from app.services.verification_service import VerificationService
 from app.services.cleanup_service import CleanupService
@@ -163,7 +166,7 @@ async def resend_verification(resend: ResendVerification, db: Session = Depends(
     
     return {"message": "Verification email sent"}
 
-@router.post("/signin", response_model=Token)
+@router.post("/signin")
 async def signin(user_credentials: UserLogin, db: Session = Depends(get_db)):
     user = UserService.authenticate_user(db, user_credentials.username, user_credentials.password)
     if not user:
@@ -180,6 +183,57 @@ async def signin(user_credentials: UserLogin, db: Session = Depends(get_db)):
             detail="Email not verified. Please verify your email before signing in.",
             headers={"X-Verification-Required": "true"}
         )
+    
+    # Check if user has OTP enabled
+    if user.otp_enabled:
+        return {"requiresOTP": True, "message": "OTP required"}
+    
+    # Update last login
+    user.last_login = func.now()
+    db.commit()
+    
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@router.post("/signin-mfa", response_model=Token)
+async def signin_mfa(user_credentials: LoginMFARequest, db: Session = Depends(get_db)):
+    user = UserService.authenticate_user(db, user_credentials.username, user_credentials.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Skip email verification for admin users
+    if not user.is_email_verified and user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Email not verified. Please verify your email before signing in.",
+            headers={"X-Verification-Required": "true"}
+        )
+    
+    # Verify OTP if enabled
+    if user.otp_enabled:
+        if not user.otp_secret:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="OTP secret not found"
+            )
+            
+        if not OTPService.verify_otp(user.otp_secret, user_credentials.otp_code):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid OTP code"
+            )
+    
+    # Update last login
+    user.last_login = func.now()
+    db.commit()
     
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(

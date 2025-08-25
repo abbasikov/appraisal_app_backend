@@ -22,7 +22,7 @@ async def startup_event():
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_HOSTS,
+    allow_origins=settings.allowed_hosts_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

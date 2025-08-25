@@ -17,9 +17,7 @@ class UserService:
                 first_name=user.first_name,
                 last_name=user.last_name,
                 phone=user.phone,
-                role=user.role,
-                license_number=user.license_number,
-                certification_level=user.certification_level
+                role=user.role
             )
             db.add(db_user)
             db.commit()

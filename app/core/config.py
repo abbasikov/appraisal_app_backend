@@ -10,7 +10,11 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     
     DATABASE_URL: str
-    ALLOWED_HOSTS: List[str] = ["http://localhost:3000", "http://localhost:5173"]
+    ALLOWED_HOSTS: str = "http://localhost:3000,http://localhost:5173"
+    
+    @property
+    def allowed_hosts_list(self) -> List[str]:
+        return [host.strip() for host in self.ALLOWED_HOSTS.split(",")]
     
     MAX_FILE_SIZE: int = 10485760  # 10MB
     UPLOAD_DIR: str = "uploads"

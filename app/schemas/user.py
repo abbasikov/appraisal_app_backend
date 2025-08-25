@@ -9,9 +9,7 @@ class UserBase(BaseModel):
     first_name: str
     last_name: str
     phone: Optional[str] = None
-    role: UserRole = UserRole.APPRAISER
-    license_number: Optional[str] = None
-    certification_level: Optional[str] = None
+    role: UserRole = UserRole.READER
 
 class UserCreate(UserBase):
     password: str
@@ -20,12 +18,13 @@ class UserUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     phone: Optional[str] = None
-    license_number: Optional[str] = None
-    certification_level: Optional[str] = None
 
 class UserResponse(UserBase):
     id: int
+    is_active: bool
     is_email_verified: bool
+    otp_enabled: bool
+    last_login: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
