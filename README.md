@@ -1,155 +1,393 @@
-# Appraisal App Backend
+# Appraisal Report Backend
 
-FastAPI backend for the Appraisal Report Management System with JWT authentication and OTP MFA.
+FastAPI backend for the Appraisal Report Management System with JWT authentication, role-based access control, and comprehensive API endpoints.
 
-## Quick Start
+## 🚀 Quick Setup
 
+### Prerequisites
+- Python 3.8+
+- PostgreSQL 12+
+- SMTP Email Account (Gmail recommended)
+
+### Installation
 ```bash
-# 1. Setup virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Navigate to backend directory
+cd appraisal_app_backend
 
-# 2. Install dependencies
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
 
-# 3. Setup database
-createdb appraisal_db
-
-# 4. Configure environment
+# Configure environment
 cp .env.example .env
-# Edit .env with your database credentials
+# Edit .env with your database and email credentials
 
-# 5. Start server
-python main.py
+# Setup database
+python migrate_db.py
 
-# 6. Create admin user
+# Create admin user
 python create_admin.py
+
+# Start server
+python main.py
 ```
 
-## Environment Configuration
+## 🔧 Configuration
 
+### Environment Variables (.env)
 ```env
 # Database
-DATABASE_URL=postgresql://postgres:password@localhost/appraisal_db
+DATABASE_URL=postgresql://username:password@localhost/appraisal_db
 
-# JWT
-SECRET_KEY=your-secret-key-here
+# Security
+SECRET_KEY=your-super-secret-key-here-make-it-long-and-random
+ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 
-# CORS
-ALLOWED_HOSTS=http://localhost:3000,http://localhost:5173
-
-# SMTP (for email verification)
-SMTP_HOST=smtp.gmail.com
+# Email (Gmail setup)
+SMTP_SERVER=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USERNAME=your-email@gmail.com
-SMTP_PASSWORD=your-app-password
+SMTP_PASSWORD=your-app-password  # Use App Password
 SMTP_FROM_EMAIL=your-email@gmail.com
+
+# Application
+APP_NAME="Appraisal Report Management"
+DEBUG=True
 ```
 
-## Features
+### Gmail App Password Setup
+1. Enable 2-Factor Authentication on Gmail
+2. Go to Google Account > Security > App Passwords
+3. Generate app password for "Mail"
+4. Use this password in SMTP_PASSWORD
 
-- **JWT Authentication**: Secure token-based authentication
-- **Two-Factor Authentication**: TOTP MFA with QR code setup
-- **Email Verification**: SMTP-based email verification system
-- **Role-based Access Control**: Admin, Editor, Reader roles
-- **Password Reset**: Secure password reset with email codes
-- **API Documentation**: Auto-generated Swagger/OpenAPI docs
+## 📁 Project Structure
 
-## API Endpoints
+```
+appraisal_app_backend/
+├── app/
+│   ├── api/v1/              # API endpoints
+│   │   ├── __init__.py
+│   │   ├── auth.py          # Authentication & MFA
+│   │   ├── clients.py       # Client management
+│   │   ├── projects.py      # Project management
+│   │   └── users.py         # User management
+│   ├── core/                # Core configuration
+│   │   ├── __init__.py
+│   │   ├── config.py        # App settings
+│   │   ├── database.py      # Database connection
+│   │   └── security.py      # Security utilities
+│   ├── models/              # SQLAlchemy models
+│   │   ├── __init__.py
+│   │   ├── user.py          # User model with MFA
+│   │   ├── client.py        # Client model
+│   │   ├── project.py       # Project model
+│   │   └── activity_log.py  # Audit logging
+│   ├── schemas/             # Pydantic schemas
+│   │   ├── __init__.py
+│   │   ├── user.py          # User schemas
+│   │   ├── client.py        # Client schemas
+│   │   ├── project.py       # Project schemas
+│   │   └── auth.py          # Auth schemas
+│   ├── services/            # Business logic
+│   │   ├── __init__.py
+│   │   ├── auth_service.py  # Authentication logic
+│   │   ├── client_service.py # Client operations
+│   │   └── project_service.py # Project operations
+│   └── utils/               # Utility functions
+│       ├── __init__.py
+│       ├── email.py         # Email utilities
+│       └── security.py     # Security helpers
+├── create_admin.py          # Admin creation script
+├── migrate_db.py           # Database migration
+├── main.py                 # Application entry point
+├── requirements.txt        # Python dependencies
+└── .env.example           # Environment template
+```
+
+## 🔐 Authentication System
+
+### User Roles
+- **admin**: Full system access, user management
+- **editor**: Create/edit clients and projects
+- **reader**: View-only access
+
+### Features
+- JWT token authentication
+- Role-based access control
+- Email verification for new users
+- Two-Factor Authentication (TOTP)
+- Password hashing with bcrypt
+- Rate limiting protection
+
+### MFA Implementation
+- QR code generation for authenticator apps
+- TOTP verification (RFC 6238)
+- Enable/disable functionality
+- Backup codes (future enhancement)
+
+## 📊 Database Models
+
+### User Model
+```python
+class User(Base):
+    id: int (Primary Key)
+    username: str (Unique)
+    email: str (Unique)
+    hashed_password: str
+    role: UserRole (admin/editor/reader)
+    is_active: bool
+    is_verified: bool
+    mfa_enabled: bool
+    mfa_secret: str (Optional)
+    created_at: datetime
+    updated_at: datetime
+```
+
+### Client Model
+```python
+class Client(Base):
+    id: int (Primary Key)
+    name: str (Required)
+    company: str (Optional)
+    email: str (Optional)
+    phone: str (Optional)
+    address: str (Optional)
+    city: str (Optional)
+    state: str (Optional)
+    zip_code: str (Optional)
+    attorney_name: str (Optional)
+    attorney_email: str (Optional)
+    attorney_phone: str (Optional)
+    case_name: str (Optional)
+    case_number: str (Optional)
+    date_of_death: date (Optional)
+    notes: text (Optional)
+    is_active: bool (Default: True)
+    created_at: datetime
+    updated_at: datetime
+```
+
+### Project Model
+```python
+class Project(Base):
+    id: int (Primary Key)
+    name: str (Required)
+    project_type: ProjectType (DIVORCE/ESTATE)
+    client_id: int (Foreign Key to Client)
+    assigned_user_id: int (Foreign Key to User, Optional)
+    start_date: date (Optional)
+    deadline: date (Optional)
+    completion_date: date (Optional)
+    status: ProjectStatus (PENDING/IN_PROGRESS/COMPLETED/CANCELLED)
+    notes: text (Optional)
+    is_active: bool (Default: True)
+    created_at: datetime
+    updated_at: datetime
+```
+
+## 🛠 API Endpoints
 
 ### Authentication
-- `POST /api/v1/auth/signup` - User registration
-- `POST /api/v1/auth/signin` - Login (returns token or OTP requirement)
-- `POST /api/v1/auth/signin-mfa` - MFA login with OTP code
+- `POST /api/v1/auth/register` - User registration
+- `POST /api/v1/auth/login` - User login
 - `POST /api/v1/auth/verify-email` - Email verification
-- `GET /api/v1/auth/me` - Get current user info
+- `POST /api/v1/auth/setup-mfa` - Setup 2FA
+- `POST /api/v1/auth/verify-mfa` - Verify 2FA code
+- `POST /api/v1/auth/disable-mfa` - Disable 2FA
 
-### Two-Factor Authentication
-- `GET /api/v1/otp/status` - Check OTP status
-- `POST /api/v1/otp/setup` - Generate QR code for setup
-- `POST /api/v1/otp/enable` - Enable OTP after verification
-- `POST /api/v1/otp/disable` - Disable OTP
+### Users
+- `GET /api/v1/users/me` - Current user info
+- `PUT /api/v1/users/me` - Update profile
+- `GET /api/v1/users/` - List users (Admin only)
 
-### Password Reset
-- `POST /api/v1/auth/password-reset` - Request reset code
-- `POST /api/v1/auth/password-reset/confirm` - Reset with code
+### Clients
+- `GET /api/v1/clients/` - List clients
+- `POST /api/v1/clients/` - Create client
+- `GET /api/v1/clients/{id}` - Get client
+- `PUT /api/v1/clients/{id}` - Update client
+- `DELETE /api/v1/clients/{id}` - Delete client (Admin only)
 
-## User Roles
+### Projects
+- `GET /api/v1/projects/` - List projects
+- `POST /api/v1/projects/` - Create project
+- `GET /api/v1/projects/{id}` - Get project
+- `PUT /api/v1/projects/{id}` - Update project
+- `DELETE /api/v1/projects/{id}` - Delete project (Admin only)
 
-| Role | Description | Permissions |
-|------|-------------|-------------|
-| **admin** | System administrator | Full access to all features |
-| **editor** | Content editor | Can manage properties and appraisals |
-| **reader** | Read-only user | Can view appraisals only |
+## 🔄 Database Migration
 
-## Database Schema
-
-### Users Table
-- `id` - Primary key
-- `username` - Unique username
-- `email` - Unique email address
-- `password_hash` - Bcrypt hashed password
-- `role` - User role (admin/editor/reader)
-- `is_active` - Account status
-- `is_email_verified` - Email verification status
-- `otp_enabled` - 2FA status
-- `otp_secret` - TOTP secret key
-- `last_login` - Last login timestamp
-
-## Security Features
-
-- **Password Hashing**: Bcrypt with salt
-- **JWT Tokens**: Secure token-based authentication
-- **TOTP MFA**: Time-based one-time passwords
-- **Email Verification**: Prevents fake account creation
-- **Rate Limiting**: Built-in request rate limiting
-- **CORS Protection**: Configurable CORS origins
-
-## API Documentation
-
-Once running, visit:
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-
-## Development
-
+### Initial Setup
 ```bash
-# Install development dependencies
-pip install -r requirements-dev.txt
-
-# Run with auto-reload
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-
-# Database migrations (if schema changes)
 python migrate_db.py
 ```
 
-## Production Deployment
+### Adding New Migrations
+1. Modify models in `app/models/`
+2. Update `migrate_db.py` with new table/column changes
+3. Run migration: `python migrate_db.py`
 
-1. **Environment**: Set production environment variables
-2. **Database**: Use production PostgreSQL instance
-3. **SMTP**: Configure production email service
-4. **Security**: Use strong SECRET_KEY and HTTPS
-5. **Reverse Proxy**: Use nginx or similar
-6. **SSL**: Configure SSL certificates
+### Migration Script Features
+- Creates all tables if they don't exist
+- Adds new columns safely
+- Handles data type changes
+- Preserves existing data
 
-## Troubleshooting
+## 👤 Admin Management
 
-### Database Issues
+### Create Admin User
 ```bash
-# Reset database
-dropdb appraisal_db
-createdb appraisal_db
-python main.py  # Auto-creates tables
+python create_admin.py
 ```
 
-### OTP Issues
-- Ensure phone/server time sync
-- Delete old authenticator entries before re-setup
-- Check TOTP secret matches between app and database
+### Admin Capabilities
+- Full CRUD access to all resources
+- User management and role assignment
+- System configuration access
+- Activity log monitoring
+- No email verification required
 
-### Email Issues
-- Verify SMTP credentials
-- Check firewall/network restrictions
-- Use app-specific passwords for Gmail
+## 📧 Email System
+
+### SMTP Configuration
+- Supports Gmail, Outlook, and custom SMTP
+- Email verification for new users
+- Password reset functionality (future)
+- Notification system (future)
+
+### Email Templates
+- Welcome email with verification code
+- MFA setup instructions
+- Account status notifications
+
+## 🔒 Security Features
+
+### Password Security
+- bcrypt hashing with salt
+- Minimum password requirements
+- Password change tracking
+
+### API Security
+- JWT token validation
+- Role-based endpoint protection
+- Rate limiting on sensitive endpoints
+- CORS configuration
+- Input validation and sanitization
+
+### Audit Logging
+- All user actions logged
+- Database change tracking
+- Failed login attempts
+- Admin activity monitoring
+
+## 🧪 Testing
+
+### Run Tests
+```bash
+# Install test dependencies
+pip install pytest pytest-asyncio httpx
+
+# Run tests
+pytest
+
+# Run with coverage
+pytest --cov=app
+```
+
+### Test Structure
+```
+tests/
+├── test_auth.py        # Authentication tests
+├── test_clients.py     # Client API tests
+├── test_projects.py    # Project API tests
+└── test_models.py      # Database model tests
+```
+
+## 🚀 Production Deployment
+
+### Environment Setup
+```env
+DEBUG=False
+SECRET_KEY=production-secret-key-here
+DATABASE_URL=postgresql://user:pass@prod-db:5432/appraisal_db
+SMTP_SERVER=smtp.sendgrid.net  # Or AWS SES
+```
+
+### Deployment Checklist
+- [ ] Set DEBUG=False
+- [ ] Use production database
+- [ ] Configure production SMTP
+- [ ] Set strong SECRET_KEY
+- [ ] Enable HTTPS
+- [ ] Configure reverse proxy
+- [ ] Set up monitoring
+- [ ] Regular backups
+
+### Docker Deployment
+```dockerfile
+FROM python:3.9-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+COPY . .
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+## 📊 Monitoring & Logging
+
+### Application Logs
+- Request/response logging
+- Error tracking
+- Performance metrics
+- Security events
+
+### Health Checks
+- Database connectivity
+- Email service status
+- API endpoint health
+
+## 🔧 Development
+
+### Code Style
+- Follow PEP 8 guidelines
+- Use type hints
+- Document functions and classes
+- Write comprehensive tests
+
+### Adding New Features
+1. Create/update models in `app/models/`
+2. Add schemas in `app/schemas/`
+3. Implement service logic in `app/services/`
+4. Create API endpoints in `app/api/v1/`
+5. Write tests
+6. Update documentation
+
+### Database Changes
+1. Modify model classes
+2. Update migration script
+3. Test migration on development database
+4. Document changes
+
+## 📞 Support
+
+### Common Issues
+- **Database connection**: Check DATABASE_URL format
+- **Email not sending**: Verify SMTP credentials and app password
+- **Authentication errors**: Check SECRET_KEY and token expiration
+- **Permission denied**: Verify user roles and endpoint permissions
+
+### Debugging
+```bash
+# Enable debug mode
+export DEBUG=True
+
+# Check logs
+tail -f app.log
+
+# Test database connection
+python -c "from app.core.database import engine; print(engine.execute('SELECT 1').scalar())"
+```

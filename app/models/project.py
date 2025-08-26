@@ -5,18 +5,19 @@ from app.db.database import Base
 import enum
 
 class AppraisalType(enum.Enum):
-    ESTATE = "estate"
-    DIVORCE = "divorce"
-    INSURANCE = "insurance"
-    DONATION = "donation"
-    OTHER = "other"
+    DIVORCE = "DIVORCE"
+    ESTATE = "ESTATE"
+    INSURANCE = "INSURANCE"
+    TAX = "TAX"
+    DONATION = "DONATION"
+    OTHER = "OTHER"
 
 class ProjectStatus(enum.Enum):
-    DRAFT = "draft"
-    IN_PROGRESS = "in_progress"
-    REVIEW = "review"
-    COMPLETED = "completed"
-    DELIVERED = "delivered"
+    DRAFT = "DRAFT"
+    IN_PROGRESS = "IN_PROGRESS"
+    REVIEW = "REVIEW"
+    COMPLETED = "COMPLETED"
+    DELIVERED = "DELIVERED"
 
 class Project(Base):
     __tablename__ = "projects"
@@ -24,7 +25,7 @@ class Project(Base):
     id = Column(Integer, primary_key=True, index=True)
     project_name = Column(String, nullable=False)
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
-    assigned_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    assigned_user_id = Column(Integer, ForeignKey("users.id"))
     case_number = Column(String)
     appraisal_type = Column(Enum(AppraisalType), nullable=False)
     purpose = Column(Text)

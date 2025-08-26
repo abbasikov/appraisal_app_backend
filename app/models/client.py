@@ -16,6 +16,13 @@ class Client(Base):
     state = Column(String)
     zip_code = Column(String)
     parent_client_id = Column(Integer, ForeignKey("clients.id"))
+    # Divorce-specific fields
+    attorney_name = Column(String)
+    attorney_email = Column(String)
+    attorney_phone = Column(String)
+    case_name = Column(String)
+    case_number = Column(String)
+    date_of_death = Column(DateTime(timezone=True))  # For estate cases
     is_active = Column(Boolean, default=True, nullable=False)
     notes = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
