@@ -19,3 +19,5 @@ pandas==2.1.4
 email-validator==2.1.0
 pyotp==2.9.0
 qrcode[pil]==7.4.2
+dropbox>=11.36.2
+requests>=2.31.0

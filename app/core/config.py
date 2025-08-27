@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str
     SMTP_FROM_EMAIL: str
     
+    # Dropbox Configuration
+    DROPBOX_APP_KEY: str = ""
+    DROPBOX_APP_SECRET: str = ""
+    DROPBOX_ACCESS_TOKEN: str = ""
+    
+    # File Upload Settings
+    ALLOWED_IMAGE_EXTENSIONS: list = [".jpg", ".jpeg", ".png", ".gif", ".bmp"]
+    
     class Config:
         env_file = ".env"
 

@@ -56,6 +56,7 @@ class ProjectResponse(BaseModel):
     assigned_user_name: Optional[str] = None  # From joined user table
     status: str
     dropbox_folder_link: Optional[str] = None
+    dropbox_links: List[str] = []
     total_value: Optional[float] = 0
     item_count: int = 0
     notes: Optional[str] = None

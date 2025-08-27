@@ -3,9 +3,13 @@ from sqlalchemy.orm import Session
 from typing import List
 from app.db.database import get_db
 from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse
+from app.schemas.photo import PhotoResponse
 from app.services.project_service import ProjectService
+from app.services.photo_service import PhotoService
 from app.core.deps import get_current_user
 from app.models.user import User, UserRole
+from app.models.photo import Photo
+import os
 
 router = APIRouter()
 
@@ -69,7 +73,7 @@ async def get_projects(
             detail="Failed to retrieve projects"
         )
 
-@router.get("/{project_id}", response_model=ProjectResponse)
+@router.get("/{project_id}")
 async def get_project(
     project_id: int,
     db: Session = Depends(get_db),
@@ -167,3 +171,68 @@ async def delete_project(
         )
     
     return {"message": "Project deleted successfully"}
+
+@router.get("/{project_id}/photos", response_model=List[PhotoResponse])
+async def get_project_photos(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    photos = PhotoService.get_photos_by_project(db, project_id)
+    return photos
+
+@router.get("/{project_id}/photos/{photo_id}/thumbnail")
+async def get_photo_thumbnail(
+    project_id: int,
+    photo_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    from fastapi.responses import FileResponse
+    
+    photo = db.query(Photo).filter(
+        Photo.id == photo_id,
+        Photo.project_id == project_id,
+        Photo.is_deleted == False
+    ).first()
+    
+    if not photo or not photo.thumbnail_path or not os.path.exists(photo.thumbnail_path):
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    
+    return FileResponse(photo.thumbnail_path, media_type=photo.mime_type)
+
+@router.post("/{project_id}/import-photos")
+async def import_photos(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role not in [UserRole.ADMIN, UserRole.EDITOR]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    project = ProjectService.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    dropbox_links = project.get('dropbox_links', [])
+    if not dropbox_links:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No Dropbox links configured for this project"
+        )
+    
+    imported_photos = PhotoService.import_photos_from_dropbox(
+        db, project_id, dropbox_links, current_user.id
+    )
+    
+    return {
+        "message": f"Successfully imported {len(imported_photos)} photos",
+        "imported_count": len(imported_photos)
+    }
+
