@@ -244,7 +244,23 @@ async def signin_mfa(user_credentials: LoginMFARequest, db: Session = Depends(ge
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(current_user: User = Depends(get_current_user)):
-    return current_user
+    # Convert user to dict and ensure role is string
+    user_dict = {
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "first_name": current_user.first_name,
+        "last_name": current_user.last_name,
+        "phone": current_user.phone,
+        "role": current_user.role.value,  # Convert enum to string
+        "is_active": current_user.is_active,
+        "is_email_verified": current_user.is_email_verified,
+        "otp_enabled": current_user.otp_enabled,
+        "last_login": current_user.last_login,
+        "created_at": current_user.created_at,
+        "updated_at": current_user.updated_at
+    }
+    return user_dict
 
 @router.post("/password-reset")
 async def request_password_reset(password_reset: PasswordReset, db: Session = Depends(get_db)):

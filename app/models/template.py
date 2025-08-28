@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, JSON
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, JSON, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.database import Base
@@ -10,10 +10,12 @@ class Template(Base):
     name = Column(String, nullable=False)
     appraisal_type = Column(String, nullable=False)
     file_path = Column(String, nullable=False)
+    fillable_file_path = Column(String)
     description = Column(Text)
-    field_mappings = Column(JSON)  # Store dynamic field mappings as JSON
+    field_mappings = Column(JSON)
     is_active = Column(Boolean, default=True)
     version = Column(String, default="1.0")
+    created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
