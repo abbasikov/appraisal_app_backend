@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     DROPBOX_APP_KEY: str = ""
     DROPBOX_APP_SECRET: str = ""
     DROPBOX_ACCESS_TOKEN: str = ""
+    DROPBOX_REFRESH_TOKEN: str = ""
+    DROPBOX_TOKEN_EXPIRES_AT: str = ""
     
     # File Upload Settings
     ALLOWED_IMAGE_EXTENSIONS: list = [".jpg", ".jpeg", ".png", ".gif", ".bmp"]

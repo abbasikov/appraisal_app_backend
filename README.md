@@ -1,19 +1,22 @@
-# Appraisal Report Backend
+# Appraisal Report Management System - Backend
 
-FastAPI backend for the Appraisal Report Management System with template processing and report generation.
+FastAPI backend with PostgreSQL database, JWT authentication, Dropbox integration, and user management.
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - Python 3.8+
 - PostgreSQL 12+
-- Virtual Environment
+- Dropbox App (for photo import)
 
 ### Setup
 ```bash
+# Clone and navigate
+cd appraisal_app_backend
+
 # Create virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
@@ -22,131 +25,112 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your credentials
 
-# Run database migrations
+# Setup database
 python migrate_db.py
-python migrate_template_db.py
 
-# Create admin account
+# Create admin user
 python create_admin.py
 
 # Start server
 python main.py
 ```
 
-## 📁 Project Structure
+## Configuration
 
+### Environment Variables (.env)
+```env
+# Database
+DATABASE_URL=postgresql://username:password@localhost/appraisal_db
+
+# Security
+SECRET_KEY=your-secret-key
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# Email
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=your-email@gmail.com
+SMTP_PASSWORD=your-app-password
+SMTP_FROM_EMAIL=your-email@gmail.com
+
+# Dropbox Integration
+DROPBOX_APP_KEY=your_dropbox_app_key
+DROPBOX_APP_SECRET=your_dropbox_app_secret
+DROPBOX_ACCESS_TOKEN=your_dropbox_access_token
+```
+
+### Dropbox Setup
+1. Create app at https://www.dropbox.com/developers/apps
+2. Enable permissions: `files.content.read`, `files.metadata.read`, `sharing.read`
+3. Generate access token
+4. Add credentials to .env
+
+## API Documentation
+
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
+
+### Key Endpoints
+- `POST /api/v1/auth/login` - Authentication
+- `GET /api/v1/users/` - List users (Admin/Editor)
+- `POST /api/v1/users/invite` - Invite user
+- `POST /api/v1/users/setup-password` - Setup password
+- `GET /api/v1/projects/` - List projects
+- `POST /api/v1/projects/{id}/import-photos` - Import photos from Dropbox
+- `GET /api/v1/projects/{id}/photos` - List project photos
+
+## Features
+
+### Authentication & User Management
+- JWT token-based authentication
+- Two-factor authentication (TOTP)
+- Role-based access control (Admin, Editor, Reader)
+- User invitation system with email notifications
+- Password setup flow for invited users
+- Email verification for new users
+
+### Dropbox Integration
+- Shared folder photo import with recursive subfolder scanning
+- Automatic ZIP extraction for proper image files
+- Thumbnail generation (150x150px)
+- EXIF date extraction and chronological sorting
+- Authenticated thumbnail serving
+- Support for up to 10 Dropbox folder links per project
+
+### Database Models
+- Users with MFA and invitation support
+- Clients and Projects with Dropbox links
+- Photos with metadata and folder path tracking
+- Activity logging for all user actions
+
+## Project Structure
 ```
 app/
 ├── api/v1/endpoints/     # API routes
-│   ├── auth.py          # Authentication
-│   ├── clients.py       # Client management
-│   ├── projects.py      # Project management
-│   ├── templates.py     # Template management
-│   └── users.py         # User management
-├── core/                # Configuration
-├── models/              # SQLAlchemy models
-│   ├── user.py         # User with MFA
-│   ├── client.py       # Client data
-│   ├── project.py      # Project data
-│   ├── template.py     # Template storage
-│   └── report.py       # Generated reports
+├── core/                 # Configuration
+├── models/              # Database models
 ├── schemas/             # Pydantic schemas
 ├── services/            # Business logic
-│   ├── template_service.py
-│   └── client_service.py
 └── utils/               # Utilities
-    └── template_converter.py  # Word processing
 ```
 
-## 🔧 Features
+## Development
 
-### Template Management
-- **Upload**: Word (.docx) template upload with validation
-- **Conversion**: Automatic field extraction and fillable template creation
-- **Field Mapping**: Configure field types, defaults, and validation
-- **Report Generation**: Merge templates with project data
-
-### Authentication & Security
-- **JWT Tokens**: Secure API authentication
-- **Role-Based Access**: Admin, Editor, Reader permissions
-- **MFA Support**: TOTP-based two-factor authentication
-- **Input Validation**: Comprehensive request validation
-
-### Database Models
-- **Users**: Authentication with roles and MFA
-- **Clients**: Client information with attorney details
-- **Projects**: Appraisal projects with status tracking
-- **Templates**: Word template storage with field mappings
-- **Reports**: Generated report tracking
-
-## 🌐 API Endpoints
-
-### Authentication
-- `POST /auth/signin` - User login
-- `POST /auth/signup` - User registration
-- `GET /auth/me` - Current user info
-
-### Templates
-- `GET /templates/` - List templates
-- `POST /templates/upload` - Upload template
-- `GET /templates/{id}` - Get template details
-- `PUT /templates/{id}/mappings` - Update field mappings
-- `POST /templates/{id}/generate` - Generate report
-- `GET /templates/{id}/download` - Download template
-
-### Projects & Clients
-- `GET /projects/` - List projects
-- `POST /projects/` - Create project
-- `GET /clients/` - List clients
-- `POST /clients/` - Create client
-
-## 🔒 Security
-
-### Role-Based Permissions
-- **Admin**: Full system access
-- **Editor**: Create/edit clients, projects, templates
-- **Reader**: View-only access
-
-### File Security
-- File type validation (.docx only)
-- Size limits (10MB max)
-- Secure file storage
-- Path traversal protection
-
-## 📊 Configuration
-
-### Environment Variables
-```env
-DATABASE_URL=postgresql://user:pass@localhost/db
-SECRET_KEY=your-secret-key
-SMTP_SERVER=smtp.gmail.com
-SMTP_USERNAME=your-email@gmail.com
-SMTP_PASSWORD=your-app-password
-```
-
-### Dependencies
-- **FastAPI**: Web framework
-- **SQLAlchemy**: Database ORM
-- **python-docx**: Word document processing
-- **PyJWT**: JWT token handling
-- **bcrypt**: Password hashing
-
-## 🧪 Testing
-
+### Database Migration
 ```bash
-# Run tests
-pytest
-
-# Test API endpoints
-python test_api.py
-
-# Check database
-python check_db.py
+python migrate_db.py
 ```
 
-## 📈 Performance
+### Create Admin User
+```bash
+python create_admin.py
+```
 
-- **Async Support**: FastAPI async endpoints
-- **Database Pooling**: SQLAlchemy connection pooling
-- **File Streaming**: Efficient file upload/download
-- **Caching**: Template and field mapping caching
+## Deployment
+
+### Production Settings
+- Set `DEBUG=False`
+- Use strong `SECRET_KEY`
+- Configure production database
+- Set up HTTPS
+- Use production SMTP service
