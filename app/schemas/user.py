@@ -3,36 +3,22 @@ from typing import Optional
 from datetime import datetime
 from app.models.user import UserRole
 
-class UserBase(BaseModel):
+class UserCreate(BaseModel):
     username: str
     email: EmailStr
+    password: str
     first_name: str
     last_name: str
     phone: Optional[str] = None
     role: UserRole = UserRole.READER
-
-class UserCreate(UserBase):
-    password: str
 
 class UserUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     phone: Optional[str] = None
 
-class UserResponse(UserBase):
-    id: int
-    is_active: bool
-    is_email_verified: bool
-    otp_enabled: bool
-    last_login: Optional[datetime] = None
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
-
 class UserLogin(BaseModel):
-    username: str  # Can be username or email
+    username: str
     password: str
 
 class Token(BaseModel):
@@ -47,6 +33,35 @@ class PasswordResetConfirm(BaseModel):
     code: str
     new_password: str
 
+class UserInvite(BaseModel):
+    email: EmailStr
+    first_name: str
+    last_name: str
+    role: UserRole
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    email: str
+    first_name: str
+    last_name: str
+    role: UserRole
+    is_active: bool
+    is_email_verified: bool
+    password_set: bool
+    invited_by: Optional[int] = None
+    created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class UserRoleUpdate(BaseModel):
+    role: UserRole
+
+class PasswordSetup(BaseModel):
+    token: str
+    password: str
+
 class EmailVerification(BaseModel):
     email: EmailStr
     code: str
@@ -56,9 +71,6 @@ class ResendVerification(BaseModel):
 
 class VerificationStatus(BaseModel):
     exists: bool
-    is_verified: Optional[bool] = None
-    has_pending_code: Optional[bool] = None
-    code_expires_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
-    can_resend: Optional[bool] = None
-    wait_time: Optional[int] = None
+    is_verified: bool
+    can_resend: bool = False
+    wait_time: int = 0

@@ -1,6 +1,6 @@
 # Appraisal Report Management System - Backend
 
-FastAPI backend with PostgreSQL database, JWT authentication, and Dropbox integration.
+FastAPI backend with PostgreSQL database, JWT authentication, Dropbox integration, and user management.
 
 ## Quick Start
 
@@ -46,7 +46,7 @@ DATABASE_URL=postgresql://username:password@localhost/appraisal_db
 SECRET_KEY=your-secret-key
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 
-# Email (Gmail recommended)
+# Email
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USERNAME=your-email@gmail.com
@@ -72,31 +72,36 @@ DROPBOX_ACCESS_TOKEN=your_dropbox_access_token
 
 ### Key Endpoints
 - `POST /api/v1/auth/login` - Authentication
+- `GET /api/v1/users/` - List users (Admin/Editor)
+- `POST /api/v1/users/invite` - Invite user
+- `POST /api/v1/users/setup-password` - Setup password
 - `GET /api/v1/projects/` - List projects
-- `POST /api/v1/projects/{id}/dropbox-links` - Add Dropbox folders
 - `POST /api/v1/projects/{id}/import-photos` - Import photos from Dropbox
 - `GET /api/v1/projects/{id}/photos` - List project photos
 
 ## Features
 
-### Authentication
+### Authentication & User Management
 - JWT token-based authentication
 - Two-factor authentication (TOTP)
 - Role-based access control (Admin, Editor, Reader)
+- User invitation system with email notifications
+- Password setup flow for invited users
 - Email verification for new users
 
 ### Dropbox Integration
-- Shared folder photo import
-- Automatic ZIP extraction
+- Shared folder photo import with recursive subfolder scanning
+- Automatic ZIP extraction for proper image files
 - Thumbnail generation (150x150px)
-- EXIF date extraction
+- EXIF date extraction and chronological sorting
 - Authenticated thumbnail serving
+- Support for up to 10 Dropbox folder links per project
 
 ### Database Models
-- Users with MFA support
-- Clients and Projects
-- Photos with metadata
-- Activity logging
+- Users with MFA and invitation support
+- Clients and Projects with Dropbox links
+- Photos with metadata and folder path tracking
+- Activity logging for all user actions
 
 ## Project Structure
 ```
@@ -121,7 +126,11 @@ python migrate_db.py
 python create_admin.py
 ```
 
-### Run Tests
-```bash
-pytest
-```
+## Deployment
+
+### Production Settings
+- Set `DEBUG=False`
+- Use strong `SECRET_KEY`
+- Configure production database
+- Set up HTTPS
+- Use production SMTP service

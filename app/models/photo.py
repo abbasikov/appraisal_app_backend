@@ -19,6 +19,8 @@ class Photo(Base):
     sort_order = Column(Integer, default=0)
     is_deleted = Column(Boolean, default=False)
     dropbox_file_id = Column(String)
+    dropbox_folder_path = Column(String)  # Store the folder/subfolder path
+    source_folder_link = Column(String)   # Store which dropbox link this came from
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

@@ -64,7 +64,7 @@ class PhotoService:
                         # Generate thumbnail with unique naming
                         thumbnail_path = PhotoService.create_thumbnail(local_path, project_id)
                         
-                        # Create photo record
+                        # Create photo record with folder tracking
                         photo = Photo(
                             project_id=project_id,
                             original_filename=file_info['name'],
@@ -76,7 +76,9 @@ class PhotoService:
                             height=height,
                             exif_date=exif_date,
                             sort_order=len(imported_photos) + 1,
-                            dropbox_file_id=file_info.get('id')
+                            dropbox_file_id=file_info.get('id'),
+                            dropbox_folder_path=file_info.get('folder_path', '/'),
+                            source_folder_link=link
                         )
                         
                         db.add(photo)
@@ -223,12 +225,12 @@ class PhotoService:
     
     @staticmethod
     def get_photos_by_project(db: Session, project_id: int) -> List[Photo]:
-        """Get all photos for a project, ordered by EXIF date"""
+        """Get all photos for a project, ordered by EXIF date (latest first)"""
         try:
             return db.query(Photo).filter(
                 Photo.project_id == project_id,
                 Photo.is_deleted == False
-            ).order_by(Photo.exif_date.asc().nullslast(), Photo.sort_order.asc()).all()
+            ).order_by(Photo.exif_date.desc().nullslast(), Photo.sort_order.asc()).all()
         except Exception as e:
             print(f"❌ Error fetching photos: {e}")
             return []
