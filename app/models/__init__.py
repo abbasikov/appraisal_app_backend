@@ -1,5 +1,6 @@
 from .user import User
 from .client import Client
+from .account import Account
 from .project import Project
 from .photo import Photo
 from .item import Item

@@ -25,6 +25,7 @@ class Project(Base):
     id = Column(Integer, primary_key=True, index=True)
     project_name = Column(String, nullable=False)
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
+    account_id = Column(Integer, ForeignKey("accounts.id"))
     assigned_user_id = Column(Integer, ForeignKey("users.id"))
     case_number = Column(String)
     appraisal_type = Column(Enum(AppraisalType), nullable=False)
@@ -43,6 +44,7 @@ class Project(Base):
 
     # Relationships
     client = relationship("Client", back_populates="projects")
+    account = relationship("Account", back_populates="projects")
     assigned_user = relationship("User")
     template = relationship("Template")
     photos = relationship("Photo", back_populates="project")

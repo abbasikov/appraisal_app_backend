@@ -87,6 +87,13 @@ class PhotoService:
                     else:
                         print(f"❌ Failed to download: {file_info['name']}")
             
+            # Sort imported photos chronologically by EXIF date
+            imported_photos.sort(key=lambda p: p.exif_date or datetime.min)
+            
+            # Update sort_order based on chronological order
+            for i, photo in enumerate(imported_photos):
+                photo.sort_order = i + 1
+            
             db.commit()
             
             # Log activity
@@ -189,11 +196,21 @@ class PhotoService:
                 if image.mode in ('RGBA', 'LA', 'P'):
                     image = image.convert('RGB')
                 
-                # Create thumbnail (150x150 max, maintain aspect ratio)
-                image.thumbnail((150, 150), Image.Resampling.LANCZOS)
+                # Create thumbnail with correct specifications from requirements
+                # Horizontal (72 DPI): 180px (h) × 240px (w)
+                # Vertical (72 DPI): 180px (h) × 136px (w)
+                original_width, original_height = image.size
                 
-                # Always save as JPEG to ensure consistency
-                image.save(thumbnail_path, 'JPEG', optimize=True, quality=85)
+                if original_width > original_height:  # Horizontal image
+                    target_size = (240, 180)
+                else:  # Vertical image
+                    target_size = (136, 180)
+                
+                # Resize maintaining aspect ratio within target dimensions
+                image.thumbnail(target_size, Image.Resampling.LANCZOS)
+                
+                # Always save as JPEG to ensure consistency with 72 DPI
+                image.save(thumbnail_path, 'JPEG', optimize=True, quality=85, dpi=(72, 72))
             
             print(f"✅ Created unique thumbnail: {thumbnail_path}")
             return thumbnail_path
@@ -225,12 +242,12 @@ class PhotoService:
     
     @staticmethod
     def get_photos_by_project(db: Session, project_id: int) -> List[Photo]:
-        """Get all photos for a project, ordered by EXIF date (latest first)"""
+        """Get all photos for a project, ordered by EXIF date (chronological order)"""
         try:
             return db.query(Photo).filter(
                 Photo.project_id == project_id,
                 Photo.is_deleted == False
-            ).order_by(Photo.exif_date.desc().nullslast(), Photo.sort_order.asc()).all()
+            ).order_by(Photo.exif_date.asc().nullslast(), Photo.sort_order.asc()).all()
         except Exception as e:
             print(f"❌ Error fetching photos: {e}")
             return []
