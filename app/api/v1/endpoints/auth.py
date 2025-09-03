@@ -168,13 +168,17 @@ async def resend_verification(resend: ResendVerification, db: Session = Depends(
 
 @router.post("/signin")
 async def signin(user_credentials: UserLogin, db: Session = Depends(get_db)):
+    print(f"🔐 Login attempt - Username: '{user_credentials.username}', Password length: {len(user_credentials.password)}")
     user = UserService.authenticate_user(db, user_credentials.username, user_credentials.password)
     if not user:
+        print(f"❌ Authentication failed for username: '{user_credentials.username}'")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
+    print(f"✅ Authentication successful for user: {user.username}")
     
     # Skip email verification for admin users
     if not user.is_email_verified and user.role != UserRole.ADMIN:
@@ -197,6 +201,7 @@ async def signin(user_credentials: UserLogin, db: Session = Depends(get_db)):
         data={"sub": user.username}, expires_delta=access_token_expires
     )
     
+    print(f"🎫 Token generated for user: {user.username}")
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.post("/signin-mfa", response_model=Token)

@@ -30,6 +30,7 @@ class UserService:
                 password_hash="",  # Empty until password is set
                 first_name=user_invite.first_name,
                 last_name=user_invite.last_name,
+                mobile_number=user_invite.mobile_number,
                 role=user_invite.role,
                 is_active=False,  # Inactive until password is set
                 is_email_verified=False,
@@ -207,6 +208,7 @@ class UserService:
                 first_name=user_create.first_name,
                 last_name=user_create.last_name,
                 phone=user_create.phone,
+                mobile_number=user_create.mobile_number,
                 role=user_create.role,
                 is_active=True,
                 password_set=True

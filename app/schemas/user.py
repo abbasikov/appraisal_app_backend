@@ -10,12 +10,14 @@ class UserCreate(BaseModel):
     first_name: str
     last_name: str
     phone: Optional[str] = None
+    mobile_number: Optional[str] = None
     role: UserRole = UserRole.READER
 
 class UserUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     phone: Optional[str] = None
+    mobile_number: Optional[str] = None
 
 class UserLogin(BaseModel):
     username: str
@@ -37,6 +39,7 @@ class UserInvite(BaseModel):
     email: EmailStr
     first_name: str
     last_name: str
+    mobile_number: Optional[str] = None
     role: UserRole
 
 class UserResponse(BaseModel):
@@ -45,6 +48,7 @@ class UserResponse(BaseModel):
     email: str
     first_name: str
     last_name: str
+    mobile_number: Optional[str] = None
     role: UserRole
     is_active: bool
     is_email_verified: bool
