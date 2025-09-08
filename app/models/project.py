@@ -49,6 +49,7 @@ class Project(Base):
     template = relationship("Template")
     photos = relationship("Photo", back_populates="project")
     items = relationship("Item", back_populates="project")
+    appraisal_items = relationship("AppraisalItem", back_populates="project")
     reports = relationship("Report", back_populates="project")
     activity_logs = relationship("ActivityLog", back_populates="project")
 

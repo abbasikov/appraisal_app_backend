@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import appraisals, projects, users, reports, auth, otp, clients, photos, templates, accounts, dashboard
+from app.api.v1.endpoints import appraisals, projects, users, reports, auth, otp, clients, photos, templates, accounts, dashboard, appraisal_workflow
 
 api_router = APIRouter()
 
@@ -14,3 +14,4 @@ api_router.include_router(appraisals.router, prefix="/appraisals", tags=["apprai
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
 api_router.include_router(templates.router, prefix="/templates", tags=["templates"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
+api_router.include_router(appraisal_workflow.router, prefix="/appraisal-workflow", tags=["appraisal-workflow"])
