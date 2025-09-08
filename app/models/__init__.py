@@ -4,6 +4,7 @@ from .account import Account
 from .project import Project
 from .photo import Photo
 from .item import Item
+from .appraisal_item import AppraisalItem
 from .report import Report
 from .template import Template
 from .metals_price import MetalsPrice
