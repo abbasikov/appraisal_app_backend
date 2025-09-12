@@ -1,11 +1,11 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, validator
 from typing import Optional
 from datetime import datetime
 
 class ClientCreate(BaseModel):
     name: str
     company: Optional[str] = None
-    email: Optional[EmailStr] = None
+    email: Optional[str] = None
     phone: Optional[str] = None
     address: Optional[str] = None
     city: Optional[str] = None  
@@ -13,12 +13,23 @@ class ClientCreate(BaseModel):
     zip_code: Optional[str] = None
     # Divorce-specific fields
     attorney_name: Optional[str] = None
-    attorney_email: Optional[EmailStr] = None
+    attorney_email: Optional[str] = None
     attorney_phone: Optional[str] = None
     case_name: Optional[str] = None
     case_number: Optional[str] = None
     date_of_death: Optional[datetime] = None  # For estate cases later
     notes: Optional[str] = None
+    
+    @validator('email', 'attorney_email', pre=True)
+    def validate_email(cls, v):
+        if v and v.strip():
+            # Basic email validation
+            import re
+            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+            if not re.match(email_pattern, v.strip()):
+                raise ValueError('Invalid email format')
+            return v.strip()
+        return None
 
 class ClientUpdate(ClientCreate):
     pass
