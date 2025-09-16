@@ -16,6 +16,7 @@ class ClientService:
                 
             db_client = Client(
                 name=client.name.strip(),
+                parent_account_id=client.parent_account_id,
                 company=client.company.strip() if client.company else None,
                 email=client.email.strip() if client.email else None,
                 phone=client.phone.strip() if client.phone else None,
@@ -56,7 +57,8 @@ class ClientService:
     @staticmethod
     def get_clients(db: Session, skip: int = 0, limit: int = 100, search: str = None) -> List[Client]:
         try:
-            query = db.query(Client).filter(Client.is_active == True)
+            from app.models.account import Account
+            query = db.query(Client).outerjoin(Account, Client.parent_account_id == Account.id).filter(Client.is_active == True)
             
             if search and search.strip():
                 search_term = f"%{search.strip()}%"

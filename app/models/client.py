@@ -15,7 +15,7 @@ class Client(Base):
     city = Column(String)
     state = Column(String)
     zip_code = Column(String)
-    parent_client_id = Column(Integer, ForeignKey("clients.id"))
+    parent_account_id = Column(Integer, ForeignKey("accounts.id"))  # Link to Account
     # Divorce-specific fields
     attorney_name = Column(String)
     attorney_email = Column(String)
@@ -29,8 +29,7 @@ class Client(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
-    parent_client = relationship("Client", remote_side=[id])
-    sub_clients = relationship("Client", back_populates="parent_client")
+    parent_account = relationship("Account", back_populates="clients")
     projects = relationship("Project", back_populates="client")
 
     def __repr__(self):

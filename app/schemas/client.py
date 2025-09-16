@@ -4,6 +4,7 @@ from datetime import datetime
 
 class ClientCreate(BaseModel):
     name: str
+    parent_account_id: Optional[int] = None  # Link to Account (attorney, estate planner, etc.)
     company: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
@@ -37,6 +38,8 @@ class ClientUpdate(ClientCreate):
 class ClientResponse(BaseModel):
     id: int
     name: str
+    parent_account_id: Optional[int] = None
+    parent_account_name: Optional[str] = None  # From joined account table
     company: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None

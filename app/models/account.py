@@ -36,6 +36,7 @@ class Account(Base):
     # Relationships
     parent_account = relationship("Account", remote_side=[id])
     sub_accounts = relationship("Account", back_populates="parent_account")
+    clients = relationship("Client", back_populates="parent_account")
     projects = relationship("Project", back_populates="account")
 
     def __repr__(self):
