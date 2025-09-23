@@ -76,6 +76,9 @@ class AppraisalService:
                     "photo_thumbnail": photo.thumbnail_path if photo else None,
                     "photo_filename": photo.original_filename if photo else None
                 }
+                
+
+                
                 result.append(item_data)
             
             return result

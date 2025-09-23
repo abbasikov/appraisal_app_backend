@@ -120,21 +120,40 @@ class TemplateService:
             if not project:
                 raise HTTPException(status_code=404, detail="Project not found")
             
+            # Get appraisal items for this project
+            from app.models.appraisal_item import AppraisalItem
+            appraisal_items = db.query(AppraisalItem).filter(
+                AppraisalItem.project_id == project_id
+            ).order_by(AppraisalItem.sort_order).all()
+            
+            # Calculate total value from items
+            total_value = sum(item.appraised_value or 0 for item in appraisal_items)
+            
             project_data = {
                 "project_name": project.project_name,
                 "case_number": project.case_number,
                 "appraisal_type": project.appraisal_type.value if project.appraisal_type else "",
                 "inspection_date": str(project.inspection_date) if project.inspection_date else "",
                 "report_date": str(project.report_date) if project.report_date else "",
-                "total_value": str(project.total_value) if project.total_value else "",
-                "item_count": str(project.item_count) if project.item_count else "",
+                "total_value": str(total_value),
+                "item_count": str(len(appraisal_items)),
                 "client": {
                     "name": project.client.name if project.client else "",
                     "attorney_name": project.client.attorney_name if project.client else "",
                     "address": f"{project.client.address or ''} {project.client.city or ''} {project.client.state or ''} {project.client.zip_code or ''}" if project.client else "",
                     "email": project.client.email if project.client else "",
-                    "phone": project.client.phone if project.client else ""
-                }
+                    "phone": project.client.phone if project.client else "",
+                    "date_of_death": str(project.client.date_of_death) if project.client and project.client.date_of_death else ""
+                },
+                "appraisal_items": [
+                    {
+                        "id": item.id,
+                        "description": item.description or "",
+                        "appraised_value": item.appraised_value or 0,
+                        "photo_path": item.photo.file_path if item.photo else None,
+                        "photo_thumbnail": item.photo.thumbnail_path if item.photo else None
+                    } for item in appraisal_items
+                ]
             }
             
             generated_dir = os.path.join("templates", "generated")

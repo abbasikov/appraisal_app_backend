@@ -2,6 +2,7 @@ import re
 import os
 from typing import Dict, List, Tuple
 from docx import Document
+from docx.shared import Inches
 import logging
 
 logger = logging.getLogger(__name__)
@@ -167,6 +168,7 @@ def generate_report_from_template(template_path: str, output_path: str,
     try:
         doc = Document(template_path)
         
+        # Replace text fields first
         for paragraph in doc.paragraphs:
             _replace_fields_in_paragraph(paragraph, field_mappings, project_data)
         
@@ -175,6 +177,9 @@ def generate_report_from_template(template_path: str, output_path: str,
                 for cell in row.cells:
                     for paragraph in cell.paragraphs:
                         _replace_fields_in_paragraph(paragraph, field_mappings, project_data)
+        
+        # Handle appraisal items and images
+        _handle_appraisal_items(doc, project_data)
         
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         doc.save(output_path)
@@ -192,7 +197,43 @@ def _replace_fields_in_paragraph(paragraph, field_mappings: Dict, project_data: 
     # Check if this is field mappings data (for template generation)
     field_mapping_data = project_data.get('field_mappings', {})
     
-    # Replace field patterns
+    # Estate template specific field replacements
+    from datetime import datetime
+    
+    # Build full address
+    client_data = project_data.get('client', {})
+    full_address = f"{client_data.get('address', '')} {client_data.get('city', '')} {client_data.get('state', '')} {client_data.get('zip_code', '')}".strip()
+    
+    estate_fields = {
+        '{client_name}': client_data.get('name', ''),
+        '{current_date}': datetime.now().strftime('%B %d, %Y'),
+        '{inspection_date}': str(project_data.get('inspection_date', '')),
+        '{address}': full_address,
+        '{death_date}': str(client_data.get('date_of_death', '')),
+        '{total_value}': f"${project_data.get('total_value', '0.00')}",
+        # Also handle without curly braces for direct text replacement
+        'current_date': datetime.now().strftime('%B %d, %Y')
+    }
+    
+    # Replace estate template fields
+    for field, value in estate_fields.items():
+        if field in text:
+            text = text.replace(field, str(value) if value else '')
+    
+    # Additional specific replacements for your template
+    if '{current_date}' in text:
+        text = text.replace('{current_date}', datetime.now().strftime('%B %d, %Y'))
+    
+    # Handle whitespace variations
+    import re
+    text = re.sub(r'\{\s*current_date\s*\}', datetime.now().strftime('%B %d, %Y'), text)
+    text = re.sub(r'\{\s*client_name\s*\}', client_data.get('name', ''), text)
+    text = re.sub(r'\{\s*inspection_date\s*\}', str(project_data.get('inspection_date', '')), text)
+    text = re.sub(r'\{\s*address\s*\}', full_address, text)
+    text = re.sub(r'\{\s*death_date\s*\}', str(client_data.get('date_of_death', '')), text)
+    text = re.sub(r'\{\s*total_value\s*\}', f"${project_data.get('total_value', '0.00')}", text)
+    
+    # Replace field patterns from field mappings
     for field_name, field_config in field_mappings.items():
         # Use field mapping data if available, otherwise project data
         if field_mapping_data:
@@ -210,29 +251,85 @@ def _replace_fields_in_paragraph(paragraph, field_mappings: Dict, project_data: 
             if pattern in text:
                 text = text.replace(pattern, str(value))
     
-    # Replace common x patterns
-    import re
-    if field_mapping_data:
-        # For template generation, use field mapping defaults
-        if 'xxxxxxx' in text:
-            text = text.replace('xxxxxxx', field_mapping_data.get('Case Reference', '[Case Reference]'))
-        if 'xxxxxxxxxxxxxxxx' in text:
-            text = text.replace('xxxxxxxxxxxxxxxx', field_mapping_data.get('Property Owner 1', '[Property Owner 1]'))
-        if 'xxxxxxxxxxxxxxxxxxxxx' in text:
-            text = text.replace('xxxxxxxxxxxxxxxxxxxxx', field_mapping_data.get('Property Owner 2', '[Property Owner 2]'))
-    else:
-        # For report generation, use project data
-        if 'xxxxxxx' in text:
-            case_ref = _get_field_value('Case Reference', {}, project_data)
-            text = text.replace('xxxxxxx', case_ref if case_ref else 'Case Reference')
-        if 'xxxxxxxxxxxxxxxx' in text:
-            owner1 = _get_field_value('Property Owner 1', {}, project_data)
-            text = text.replace('xxxxxxxxxxxxxxxx', owner1 if owner1 else 'Property Owner 1')
-        if 'xxxxxxxxxxxxxxxxxxxxx' in text:
-            owner2 = _get_field_value('Property Owner 2', {}, project_data)
-            text = text.replace('xxxxxxxxxxxxxxxxxxxxx', owner2 if owner2 else 'Property Owner 2')
-    
     paragraph.text = text
+
+def _handle_appraisal_items(doc: Document, project_data: Dict):
+    """Handle appraisal items and images insertion"""
+    try:
+        appraisal_items = project_data.get('appraisal_items', [])
+        if not appraisal_items:
+            return
+        
+        total_value = sum(item.get('appraised_value', 0) for item in appraisal_items)
+        
+        # Find and process the template item section
+        template_item_paragraph = None
+        
+        # Look for "Item 1" paragraph
+        for paragraph in doc.paragraphs:
+            if 'item 1' in paragraph.text.lower():
+                template_item_paragraph = paragraph
+                break
+        
+        if template_item_paragraph and appraisal_items:
+            # Replace the first item
+            first_item = appraisal_items[0]
+            template_item_paragraph.text = f"Item 1: {first_item.get('description', 'Item Description')}"
+            
+            # Insert image after Item 1 paragraph if photo exists
+            if first_item.get('photo_path') and os.path.exists(first_item['photo_path']):
+                _insert_image_after_paragraph(doc, template_item_paragraph, first_item['photo_path'])
+            
+            # Add remaining items
+            for i, item in enumerate(appraisal_items[1:], 2):
+                # Add new item paragraph
+                new_para = doc.add_paragraph(f"Item {i}: {item.get('description', 'Item Description')}")
+                
+                # Insert image if exists
+                if item.get('photo_path') and os.path.exists(item['photo_path']):
+                    _insert_image_after_paragraph(doc, new_para, item['photo_path'])
+        
+        # Replace market values in tables
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        # Replace {market_value} with first item's value
+                        if '{market_value}' in paragraph.text and appraisal_items:
+                            first_item_value = appraisal_items[0].get('appraised_value', 0)
+                            paragraph.text = paragraph.text.replace('{market_value}', f"${first_item_value:.2f}")
+                        
+                        # Handle summary table total
+                        if 'Total' in paragraph.text and ('$' in paragraph.text or 'total' in paragraph.text.lower()):
+                            import re
+                            paragraph.text = re.sub(r'\$[\d,]*\.?\d*', f'${total_value:.2f}', paragraph.text)
+                            if '$' not in paragraph.text:
+                                paragraph.text = f"{paragraph.text.strip()} ${total_value:.2f}"
+        
+    except Exception as e:
+        logger.error(f"Error handling appraisal items: {str(e)}")
+
+def _insert_image_after_paragraph(doc: Document, paragraph, image_path: str):
+    """Insert image after a specific paragraph"""
+    try:
+        from docx.shared import Inches
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        
+        # Add a new paragraph for the image
+        img_paragraph = doc.add_paragraph()
+        img_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        # Add the image with reasonable size
+        run = img_paragraph.runs[0] if img_paragraph.runs else img_paragraph.add_run()
+        run.add_picture(image_path, width=Inches(3), height=Inches(2))
+        
+        # Add some space after image
+        doc.add_paragraph()
+        
+    except Exception as e:
+        logger.error(f"Error inserting image {image_path}: {str(e)}")
+
+
 
 def _get_field_value(field_name: str, field_config: Dict, project_data: Dict) -> str:
     """Get field value from project data"""
