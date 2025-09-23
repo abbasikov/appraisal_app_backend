@@ -6,6 +6,7 @@ from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse
 from app.schemas.photo import PhotoResponse
 from app.services.project_service import ProjectService
 from app.services.photo_service import PhotoService
+from app.services.template_service import TemplateService
 from app.core.deps import get_current_user
 from app.models.user import User, UserRole
 from app.models.photo import Photo
@@ -235,4 +236,68 @@ async def import_photos(
         "message": f"Successfully imported {len(imported_photos)} photos",
         "imported_count": len(imported_photos)
     }
+
+@router.post("/{project_id}/generate-report/{template_id}")
+async def generate_project_report(
+    project_id: int,
+    template_id: int,
+    report_type: str = "draft",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Generate report for project using specified template"""
+    if current_user.role not in [UserRole.ADMIN, UserRole.EDITOR]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    try:
+        report_path = TemplateService.generate_report(
+            db, template_id, project_id, report_type
+        )
+        
+        return {
+            "message": "Report generated successfully",
+            "report_path": report_path,
+            "template_id": template_id,
+            "project_id": project_id,
+            "download_url": f"/api/v1/projects/{project_id}/download-report/{template_id}?report_type={report_type}"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Report generation failed: {str(e)}"
+        )
+
+@router.get("/{project_id}/download-report/{template_id}")
+async def download_project_report(
+    project_id: int,
+    template_id: int,
+    report_type: str = "draft",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Download generated report"""
+    from fastapi.responses import FileResponse
+    from app.models.report import Report, ReportType
+    
+    # Find the most recent report
+    report_type_enum = ReportType.DRAFT if report_type == "draft" else ReportType.FINAL
+    
+    report = db.query(Report).filter(
+        Report.template_id == template_id,
+        Report.project_id == project_id,
+        Report.report_type == report_type_enum
+    ).order_by(Report.created_at.desc()).first()
+    
+    if not report or not report.word_path or not os.path.exists(report.word_path):
+        raise HTTPException(status_code=404, detail="Generated report not found")
+    
+    filename = f"appraisal_report_{project_id}_{template_id}_{report_type}.docx"
+    return FileResponse(
+        report.word_path, 
+        filename=filename, 
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
 

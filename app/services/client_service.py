@@ -58,7 +58,9 @@ class ClientService:
     def get_clients(db: Session, skip: int = 0, limit: int = 100, search: str = None) -> List[Client]:
         try:
             from app.models.account import Account
-            query = db.query(Client).outerjoin(Account, Client.parent_account_id == Account.id).filter(Client.is_active == True)
+            from sqlalchemy.orm import joinedload
+            
+            query = db.query(Client).options(joinedload(Client.parent_account)).filter(Client.is_active == True)
             
             if search and search.strip():
                 search_term = f"%{search.strip()}%"
@@ -71,7 +73,16 @@ class ClientService:
                     )
                 )
             
-            return query.offset(skip).limit(limit).all()
+            clients = query.offset(skip).limit(limit).all()
+            
+            # Manually set parent_account_name for response
+            for client in clients:
+                if client.parent_account:
+                    client.parent_account_name = client.parent_account.name
+                else:
+                    client.parent_account_name = None
+            
+            return clients
         except Exception as e:
             print(f"Error fetching clients: {e}")
             return []
@@ -81,7 +92,16 @@ class ClientService:
         try:
             if not client_id or client_id <= 0:
                 return None
-            return db.query(Client).filter(Client.id == client_id, Client.is_active == True).first()
+            from sqlalchemy.orm import joinedload
+            
+            client = db.query(Client).options(joinedload(Client.parent_account)).filter(Client.id == client_id, Client.is_active == True).first()
+            
+            if client and client.parent_account:
+                client.parent_account_name = client.parent_account.name
+            elif client:
+                client.parent_account_name = None
+                
+            return client
         except Exception as e:
             print(f"Error fetching client {client_id}: {e}")
             return None
