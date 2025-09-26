@@ -195,25 +195,57 @@ class ProjectService:
     
     @staticmethod
     def delete_project(db: Session, project_id: int, user_id: int) -> bool:
-        project = db.query(Project).filter(Project.id == project_id).first()
-        if not project:
-            return False
-        
-        # Hard delete for projects
-        project_name = project.project_name
-        db.delete(project)
-        db.commit()
-        
-        # Log activity
         try:
-            activity = ActivityLog(
-                user_id=user_id,
-                action=f"Deleted project: {project_name}",
-                details={"project_id": project_id, "project_name": project_name}
-            )
-            db.add(activity)
+            project = db.query(Project).filter(Project.id == project_id).first()
+            if not project:
+                print(f"Project {project_id} not found in database")
+                return False
+            
+            project_name = project.project_name
+            print(f"Deleting project: {project_name} (ID: {project_id})")
+            
+            # Delete related records first to avoid foreign key constraints
+            from app.models.photo import Photo
+            from app.models.appraisal_item import AppraisalItem
+            from app.models.activity_log import ActivityLog
+            from app.models.report import Report
+            
+            # Delete photos
+            photos_deleted = db.query(Photo).filter(Photo.project_id == project_id).delete()
+            print(f"Deleted {photos_deleted} photos")
+            
+            # Delete appraisal items
+            items_deleted = db.query(AppraisalItem).filter(AppraisalItem.project_id == project_id).delete()
+            print(f"Deleted {items_deleted} appraisal items")
+            
+            # Delete reports
+            reports_deleted = db.query(Report).filter(Report.project_id == project_id).delete()
+            print(f"Deleted {reports_deleted} reports")
+            
+            # Delete activity logs
+            logs_deleted = db.query(ActivityLog).filter(ActivityLog.project_id == project_id).delete()
+            print(f"Deleted {logs_deleted} activity logs")
+            
+            # Now delete the project
+            db.delete(project)
             db.commit()
-        except Exception:
-            pass
-        
-        return True
+            print(f"Successfully deleted project: {project_name}")
+            
+            # Log activity (without project_id since project is deleted)
+            try:
+                activity = ActivityLog(
+                    user_id=user_id,
+                    action=f"Deleted project: {project_name}",
+                    details={"project_id": project_id, "project_name": project_name}
+                )
+                db.add(activity)
+                db.commit()
+            except Exception as log_error:
+                print(f"Failed to log deletion activity: {log_error}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error deleting project {project_id}: {e}")
+            db.rollback()
+            return False

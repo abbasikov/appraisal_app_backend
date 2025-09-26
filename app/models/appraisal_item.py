@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Numeric
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Numeric, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.database import Base
@@ -11,9 +11,12 @@ class AppraisalItem(Base):
     photo_id = Column(Integer, ForeignKey("photos.id"), nullable=True)
     line_number = Column(Integer, nullable=False)
     room_area = Column(String)
+    floor_building = Column(String)
     item_type = Column(String)
     description = Column(Text)
     appraised_value = Column(Numeric(12, 2), default=0.00)
+    photos = Column(JSON, default=list)  # List of photo IDs/paths
+    attributes = Column(JSON, default=dict)  # Type-specific attributes
     sort_order = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

@@ -5,9 +5,21 @@ from app.db.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User
 from app.services.appraisal_service import AppraisalService
-from app.schemas.appraisal_item import AppraisalItemUpdate, AppraisalItemReorder
+from app.schemas.appraisal_item import AppraisalItemUpdate, AppraisalItemReorder, AppraisalSchemaResponse
+from app.schemas.appraisal_constants import ROOM_AREA_OPTIONS, FLOOR_BUILDING_OPTIONS, ITEM_TYPE_OPTIONS, TYPE_ATTRIBUTES, REQUIRED_ATTRIBUTES
 
 router = APIRouter()
+
+@router.get("/schema", response_model=AppraisalSchemaResponse)
+async def get_appraisal_schema():
+    """Get appraisal schema with dropdown options and type attributes"""
+    return AppraisalSchemaResponse(
+        room_area_options=ROOM_AREA_OPTIONS,
+        floor_building_options=FLOOR_BUILDING_OPTIONS,
+        item_type_options=ITEM_TYPE_OPTIONS,
+        type_attributes=TYPE_ATTRIBUTES,
+        required_attributes=REQUIRED_ATTRIBUTES
+    )
 
 @router.post("/projects/{project_id}/appraisal-items/initialize")
 async def initialize_appraisal_items(
