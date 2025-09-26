@@ -3,6 +3,7 @@ import os
 from typing import Dict, List, Tuple
 from docx import Document
 from docx.shared import Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 import logging
 
 logger = logging.getLogger(__name__)
@@ -17,12 +18,7 @@ class ReportGenerationError(TemplateError):
     pass
 
 FIELD_PATTERNS = [
-    (r'\{([^{}]+)\}', 'curly_bracket'),                    # {field_name}
-    (r'([A-Za-z\s]{3,30}):\s*x{3,}', 'label_colon_x'),    # Label: xxxx
-    (r'([A-Za-z\s]{3,30})\s+x{4,}', 'label_space_x'),     # Label xxxx
-    (r'\[([A-Za-z\s]+)\]', 'square_bracket'),             # [Field Name]
-    (r'_{5,}', 'underscore'),                             # _____ (5+ underscores)
-    (r'RE:\s*x{3,}', 'RE_field'),                         # RE: xxxx
+    (r'\{([^{}]+)\}', 'curly_bracket'),                    # {field_name} - ONLY format supported
 ]
 
 def convert_docx_to_fillable(input_path: str, output_path: str) -> Dict:
@@ -48,25 +44,9 @@ def convert_docx_to_fillable(input_path: str, output_path: str) -> Dict:
         raise ConversionError(f"Failed to convert template: {str(e)}")
 
 def extract_field_mappings(doc: Document) -> Dict:
-    """Extract all field mappings from document"""
+    """Extract field mappings from document - only {field_name} format"""
     field_mappings = {}
     field_counter = 1
-    
-    # Add common appraisal fields with default values
-    common_fields = {
-        "Date": {"type": "date", "default": "[Current Date]"},
-        "Client Name": {"type": "text", "default": "[Client Name]"},
-        "Law Firm": {"type": "text", "default": "[Law Firm Name]"},
-        "Client Address": {"type": "textarea", "default": "[Client Address]"},
-        "Case Reference": {"type": "text", "default": "[Case Number]"},
-        "Property Owner 1": {"type": "text", "default": "[Property Owner 1]"},
-        "Property Owner 2": {"type": "text", "default": "[Property Owner 2]"},
-        "Inspection Date": {"type": "date", "default": "[Inspection Date]"},
-        "Report Date": {"type": "date", "default": "[Report Date]"},
-        "Total Appraised Value": {"type": "currency", "default": "$0.00"},
-        "Appraiser Name": {"type": "text", "default": "Andrew Kravit"},
-        "Appraiser Credentials": {"type": "text", "default": "Certified Appraiser"}
-    }
     
     # Extract from paragraphs
     for paragraph in doc.paragraphs:
@@ -101,47 +81,20 @@ def extract_field_mappings(doc: Document) -> Dict:
                             }
                             field_counter += 1
     
-    # Always add common fields for appraisal templates
-    for field_name, field_config in common_fields.items():
-        if field_name not in field_mappings:
-            field_mappings[field_name] = {
-                "id": f"field_{field_counter}",
-                "label": field_name,
-                "type": field_config["type"],
-                "required": field_name in ["Date", "Client Name", "Total Appraised Value"],
-                "default_value": field_config["default"],
-                "options": []
-            }
-            field_counter += 1
+    # No common fields auto-added - only extract what's actually in the template
     
     return field_mappings
 
 def _extract_fields_from_text(text: str) -> List[Tuple[str, str]]:
-    """Extract field names from text using patterns"""
+    """Extract field names from text using only {field_name} pattern"""
     fields = []
     
-    for pattern, pattern_type in FIELD_PATTERNS:
-        matches = re.finditer(pattern, text)
-        for match in matches:
-            if pattern_type == 'curly_bracket':
-                field_name = match.group(1).strip()
-            elif pattern_type in ['label_colon_x', 'label_space_x']:
-                field_name = match.group(1).strip().rstrip(':')
-                # Skip if it's too generic or contains common words
-                skip_words = ['the', 'and', 'for', 'of', 'at', 'in', 'on', 'was', 'were', 'is', 'are', 'to', 'be', 'dear', 'sincerely', 'regards']
-                if len(field_name) < 3 or any(word.lower() == field_name.lower() for word in skip_words):
-                    continue
-            elif pattern_type == 'square_bracket':
-                field_name = match.group(1).strip()
-            elif pattern_type == 'RE_field':
-                field_name = "Case Reference"
-            elif pattern_type == 'underscore':
-                field_name = f"Field_{len(fields) + 1}"
-            else:
-                continue
-                
-            if field_name and len(field_name) > 2 and field_name not in [f[0] for f in fields]:
-                fields.append((field_name, pattern_type))
+    pattern, pattern_type = FIELD_PATTERNS[0]  # Only curly bracket pattern
+    matches = re.finditer(pattern, text)
+    for match in matches:
+        field_name = match.group(1).strip()
+        if field_name and len(field_name) > 0 and field_name not in [f[0] for f in fields]:
+            fields.append((field_name, pattern_type))
     
     return fields
 
@@ -191,76 +144,45 @@ def generate_report_from_template(template_path: str, output_path: str,
         raise ReportGenerationError(f"Failed to generate report: {str(e)}")
 
 def _replace_fields_in_paragraph(paragraph, field_mappings: Dict, project_data: Dict):
-    """Replace field placeholders with actual data"""
+    """Replace field placeholders with actual data - only {field_name} format"""
     text = paragraph.text
     
     # Check if this is field mappings data (for template generation)
     field_mapping_data = project_data.get('field_mappings', {})
     
-    # Estate template specific field replacements
-    from datetime import datetime
-    
-    # Build full address
-    client_data = project_data.get('client', {})
-    full_address = f"{client_data.get('address', '')} {client_data.get('city', '')} {client_data.get('state', '')} {client_data.get('zip_code', '')}".strip()
-    
-    estate_fields = {
-        '{client_name}': client_data.get('name', ''),
-        '{current_date}': datetime.now().strftime('%B %d, %Y'),
-        '{inspection_date}': str(project_data.get('inspection_date', '')),
-        '{address}': full_address,
-        '{death_date}': str(client_data.get('date_of_death', '')),
-        '{total_value}': f"${project_data.get('total_value', '0.00')}",
-        # Also handle without curly braces for direct text replacement
-        'current_date': datetime.now().strftime('%B %d, %Y')
-    }
-    
-    # Replace estate template fields
-    for field, value in estate_fields.items():
-        if field in text:
-            text = text.replace(field, str(value) if value else '')
-    
-    # Additional specific replacements for your template
-    if '{current_date}' in text:
-        text = text.replace('{current_date}', datetime.now().strftime('%B %d, %Y'))
-    
-    # Handle whitespace variations
+    # Replace all {field_name} patterns found in the document
     import re
-    text = re.sub(r'\{\s*current_date\s*\}', datetime.now().strftime('%B %d, %Y'), text)
-    text = re.sub(r'\{\s*client_name\s*\}', client_data.get('name', ''), text)
-    text = re.sub(r'\{\s*inspection_date\s*\}', str(project_data.get('inspection_date', '')), text)
-    text = re.sub(r'\{\s*address\s*\}', full_address, text)
-    text = re.sub(r'\{\s*death_date\s*\}', str(client_data.get('date_of_death', '')), text)
-    text = re.sub(r'\{\s*total_value\s*\}', f"${project_data.get('total_value', '0.00')}", text)
+    pattern = r'\{([^{}]+)\}'
     
-    # Replace field patterns from field mappings
-    for field_name, field_config in field_mappings.items():
-        # Use field mapping data if available, otherwise project data
-        if field_mapping_data:
-            value = field_mapping_data.get(field_name, field_config.get('default_value', f'[{field_name}]'))
-        else:
-            value = _get_field_value(field_name, field_config, project_data)
+    def replace_field(match):
+        field_name = match.group(1).strip()
         
-        patterns = [
-            f"{{{{{field_name}}}}}",
-            f"[{field_name}]",
-            f"{field_name}:"
-        ]
+        # Get value from project data mapping
+        value = _get_field_value_from_project(field_name, project_data)
         
-        for pattern in patterns:
-            if pattern in text:
-                text = text.replace(pattern, str(value))
+        # Fallback to field mappings if no direct mapping found
+        if value is None and field_name in field_mappings:
+            if field_mapping_data:
+                value = field_mapping_data.get(field_name, field_mappings[field_name].get('default_value', f'[{field_name}]'))
+            else:
+                value = _get_field_value(field_name, field_mappings[field_name], project_data)
+        
+        # Final fallback
+        if value is None:
+            value = f'[{field_name}]'
+        
+        return str(value) if value is not None else ''
     
+    # Replace all {field_name} patterns
+    text = re.sub(pattern, replace_field, text)
     paragraph.text = text
 
 def _handle_appraisal_items(doc: Document, project_data: Dict):
-    """Handle appraisal items and images insertion"""
+    """Handle appraisal items and images insertion - simplified for {field_name} format"""
     try:
         appraisal_items = project_data.get('appraisal_items', [])
         if not appraisal_items:
             return
-        
-        total_value = sum(item.get('appraised_value', 0) for item in appraisal_items)
         
         # Find and process the template item section
         template_item_paragraph = None
@@ -272,84 +194,133 @@ def _handle_appraisal_items(doc: Document, project_data: Dict):
                 break
         
         if template_item_paragraph and appraisal_items:
-            # Replace the first item
-            first_item = appraisal_items[0]
-            template_item_paragraph.text = f"Item 1: {first_item.get('description', 'Item Description')}"
+            # Get the index of Item 1 paragraph
+            item_paragraph_index = -1
+            for i, paragraph in enumerate(doc.paragraphs):
+                if paragraph == template_item_paragraph:
+                    item_paragraph_index = i
+                    break
             
-            # Insert image after Item 1 paragraph if photo exists
-            if first_item.get('photo_path') and os.path.exists(first_item['photo_path']):
-                _insert_image_after_paragraph(doc, template_item_paragraph, first_item['photo_path'])
+            # Replace Item 1 text
+            template_item_paragraph.text = f"Item 1"
             
-            # Add remaining items
-            for i, item in enumerate(appraisal_items[1:], 2):
-                # Add new item paragraph
-                new_para = doc.add_paragraph(f"Item {i}: {item.get('description', 'Item Description')}")
+            # Get parent and position for insertions
+            parent = template_item_paragraph._element.getparent()
+            item1_index = list(parent).index(template_item_paragraph._element)
+            
+            # Process all items
+            current_index = item1_index
+            
+            for i, item in enumerate(appraisal_items, 1):
+                if i > 1:
+                    # Insert new item paragraph
+                    current_index += 1
+                    new_item_p = doc.add_paragraph(f"Item {i}")._element
+                    parent.remove(new_item_p)
+                    parent.insert(current_index, new_item_p)
                 
                 # Insert image if exists
                 if item.get('photo_path') and os.path.exists(item['photo_path']):
-                    _insert_image_after_paragraph(doc, new_para, item['photo_path'])
+                    current_index += 1
+                    img_p = doc.add_paragraph()._element
+                    parent.remove(img_p)
+                    parent.insert(current_index, img_p)
+                    
+                    # Find and configure image paragraph
+                    for p in doc.paragraphs:
+                        if p._element == img_p:
+                            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            run = p.add_run()
+                            run.add_picture(item['photo_path'], width=Inches(3), height=Inches(2))
+                            break
+                
+                # Insert price paragraph
+                current_index += 1
+                price_p = doc.add_paragraph(f"${item.get('appraised_value', 0):.2f}")._element
+                parent.remove(price_p)
+                parent.insert(current_index, price_p)
         
-        # Replace market values in tables
-        for table in doc.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    for paragraph in cell.paragraphs:
-                        # Replace {market_value} with first item's value
-                        if '{market_value}' in paragraph.text and appraisal_items:
-                            first_item_value = appraisal_items[0].get('appraised_value', 0)
-                            paragraph.text = paragraph.text.replace('{market_value}', f"${first_item_value:.2f}")
-                        
-                        # Handle summary table total
-                        if 'Total' in paragraph.text and ('$' in paragraph.text or 'total' in paragraph.text.lower()):
-                            import re
-                            paragraph.text = re.sub(r'\$[\d,]*\.?\d*', f'${total_value:.2f}', paragraph.text)
-                            if '$' not in paragraph.text:
-                                paragraph.text = f"{paragraph.text.strip()} ${total_value:.2f}"
+
         
     except Exception as e:
         logger.error(f"Error handling appraisal items: {str(e)}")
 
-def _insert_image_after_paragraph(doc: Document, paragraph, image_path: str):
-    """Insert image after a specific paragraph"""
-    try:
-        from docx.shared import Inches
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
-        
-        # Add a new paragraph for the image
-        img_paragraph = doc.add_paragraph()
-        img_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        
-        # Add the image with reasonable size
-        run = img_paragraph.runs[0] if img_paragraph.runs else img_paragraph.add_run()
-        run.add_picture(image_path, width=Inches(3), height=Inches(2))
-        
-        # Add some space after image
-        doc.add_paragraph()
-        
-    except Exception as e:
-        logger.error(f"Error inserting image {image_path}: {str(e)}")
 
 
 
-def _get_field_value(field_name: str, field_config: Dict, project_data: Dict) -> str:
-    """Get field value from project data"""
+
+def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
+    """Get field value from project data using comprehensive mapping"""
     from datetime import datetime
     
-    # Direct field name mappings
+    client_data = project_data.get('client', {})
+    appraisal_items = project_data.get('appraisal_items', [])
+    
+    # Build full address
+    full_address = f"{client_data.get('address', '')} {client_data.get('city', '')} {client_data.get('state', '')} {client_data.get('zip_code', '')}".strip()
+    
+    # Calculate gold price (sum of all jewelry items)
+    gold_price = sum(
+        item.get('appraised_value', 0) 
+        for item in appraisal_items 
+        if item.get('item_type') and item.get('item_type').lower() == 'jewelry'
+    )
+    
+    # Comprehensive field mapping
     field_mappings = {
-        'Client Name': project_data.get('client', {}).get('name', ''),
-        'Law Firm': project_data.get('client', {}).get('attorney_name', ''),
-        'Client Address': project_data.get('client', {}).get('address', ''),
-        'Case Reference': project_data.get('case_number', ''),
-        'Property Owner 1': project_data.get('client', {}).get('name', ''),
-        'Property Owner 2': '',
-        'Inspection Date': str(project_data.get('inspection_date', '')),
-        'Report Date': str(project_data.get('report_date', datetime.now().strftime('%Y-%m-%d'))),
-        'Date': datetime.now().strftime('%B %d, %Y'),
-        'Total Appraised Value': f"${project_data.get('total_value', '0.00')}",
-        'Appraiser Name': 'Andrew Kravit',
-        'Appraiser Credentials': 'Certified Appraiser'
+        # Basic project fields
+        'client_name': client_data.get('name', ''),
+        'current_date': datetime.now().strftime('%B %d, %Y'),
+        'inspection_date': str(project_data.get('inspection_date', '')),
+        'report_date': str(project_data.get('report_date', datetime.now().strftime('%Y-%m-%d'))),
+        'address': full_address,
+        'death_date': str(client_data.get('date_of_death', '')),
+        'total_value': f"${project_data.get('total_value', '0.00')}",
+        'gold_price': f"${gold_price:.2f}" if gold_price > 0 else '',
+        'case_number': project_data.get('case_number', ''),
+        'project_name': project_data.get('project_name', ''),
+        
+        # Client fields
+        'client_address': full_address,
+        'client_phone': client_data.get('phone', ''),
+        'client_email': client_data.get('email', ''),
+        'attorney_name': client_data.get('attorney_name', ''),
+        'attorney_phone': client_data.get('attorney_phone', ''),
+        'attorney_email': client_data.get('attorney_email', ''),
+        
+        # Appraisal summary fields
+        'item_count': str(len(appraisal_items)),
+        'market_value': f"${appraisal_items[0].get('appraised_value', 0):.2f}" if appraisal_items else '$0.00',
+        
+        # Static appraiser fields
+        'appraiser_name': 'Andrew Kravit',
+        'appraiser_credentials': 'Certified Appraiser',
     }
     
-    value = field_mappings.get(field_name, field_config.get('default_value', ''))
-    return value if value else field_config.get('default_value', '')
+    # Add individual item fields for first few items
+    for i, item in enumerate(appraisal_items[:10]):  # Support up to 10 items
+        item_num = i + 1
+        field_mappings.update({
+            f'item_{item_num}_description': item.get('description', ''),
+            f'item_{item_num}_value': f"${item.get('appraised_value', 0):.2f}",
+            f'item_{item_num}_room': item.get('room_area', ''),
+            f'item_{item_num}_floor': item.get('floor_building', ''),
+            f'item_{item_num}_type': item.get('item_type', ''),
+        })
+        
+        # Add type-specific attributes
+        attributes = item.get('attributes', {})
+        for attr_name, attr_value in attributes.items():
+            field_mappings[f'item_{item_num}_{attr_name}'] = str(attr_value) if attr_value else ''
+    
+    return field_mappings.get(field_name)
+
+def _get_field_value(field_name: str, field_config: Dict, project_data: Dict) -> str:
+    """Fallback field value getter for unmapped fields"""
+    # Try project mapping first
+    value = _get_field_value_from_project(field_name, project_data)
+    if value is not None:
+        return value
+    
+    # Fallback to field config default
+    return field_config.get('default_value', f'[{field_name}]')

@@ -150,6 +150,11 @@ class TemplateService:
                         "id": item.id,
                         "description": item.description or "",
                         "appraised_value": item.appraised_value or 0,
+                        "room_area": getattr(item, 'room_area', None),
+                        "floor_building": getattr(item, 'floor_building', None),
+                        "item_type": item.item_type,
+                        "attributes": getattr(item, 'attributes', {}) or {},
+                        "photos": getattr(item, 'photos', []) or [],
                         "photo_path": item.photo.file_path if item.photo else None,
                         "photo_thumbnail": item.photo.thumbnail_path if item.photo else None
                     } for item in appraisal_items
