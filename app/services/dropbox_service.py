@@ -30,27 +30,39 @@ class DropboxService:
             return None
     
     def validate_folder_access(self, share_link: str) -> bool:
-        """Check if shared folder is accessible"""
+        """Check if shared folder is accessible - ENHANCED WITH AUTO-REFRESH"""
         try:
+            # REFRESH TOKEN LOGIC: Ensure we have a valid client before API calls
+            if not self.client:
+                print("❌ No valid Dropbox client available")
+                return False
+                
             # For shared folders, use sharing API
             shared_link_metadata = self.client.sharing_get_shared_link_metadata(share_link)
             print(f"✅ Folder access validated: {share_link}")
             return True
+            
         except dropbox.exceptions.AuthError as auth_error:
-            print(f"❌ Auth error accessing folder: {auth_error}")
-            # Try to refresh token and retry
+            print(f"⚠️ Auth error accessing folder: {auth_error}")
+            
+            # REFRESH TOKEN LOGIC: Auto-retry with token refresh
             from app.services.dropbox_auth_service import DropboxAuthService
-            if DropboxAuthService.refresh_access_token():
+            refreshed_client = DropboxAuthService.get_valid_client()
+            
+            if refreshed_client:
                 try:
-                    # Retry with refreshed token
-                    self.client = dropbox.Dropbox(settings.DROPBOX_ACCESS_TOKEN)
+                    # Retry with refreshed client
+                    self.client = refreshed_client
                     shared_link_metadata = self.client.sharing_get_shared_link_metadata(share_link)
                     print(f"✅ Folder access validated after token refresh: {share_link}")
                     return True
                 except Exception as retry_error:
                     print(f"❌ Still cannot access folder after refresh: {retry_error}")
                     return False
-            return False
+            else:
+                print("❌ Cannot refresh token - user re-authentication required")
+                return False
+                
         except Exception as e:
             print(f"❌ Folder access error: {e}")
             return False
@@ -74,7 +86,7 @@ class DropboxService:
                         print(f"🖼️  Found image: {entry.name} in {folder_path}")
                         files.append({
                             'name': entry.name,
-                            'path': entry.path_lower,
+                            'path': entry.path_lower or ('/' + entry.name),  # Use filename if path_lower is None
                             'folder_path': folder_path,
                             'size': entry.size,
                             'modified': entry.server_modified.isoformat() if entry.server_modified else None,
@@ -102,7 +114,7 @@ class DropboxService:
                             folder_path = path if path else "/"
                             files.append({
                                 'name': entry.name,
-                                'path': entry.path_lower,
+                                'path': entry.path_lower or ('/' + entry.name),  # Use filename if path_lower is None
                                 'folder_path': folder_path,
                                 'size': entry.size,
                                 'modified': entry.server_modified.isoformat() if entry.server_modified else None,
