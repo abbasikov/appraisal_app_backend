@@ -228,13 +228,29 @@ async def import_photos(
             detail="No Dropbox links configured for this project"
         )
     
-    imported_photos = PhotoService.import_photos_from_dropbox(
+    result = PhotoService.import_photos_from_dropbox(
         db, project_id, dropbox_links, current_user.id
     )
     
+    # Handle the new detailed result format
+    if not result["success"] and result["imported_count"] == 0:
+        # If completely failed, return error response
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "message": result["message"],
+                "errors": result["errors"],
+                "warnings": result["warnings"]
+            }
+        )
+    
+    # Return success response with details
     return {
-        "message": f"Successfully imported {len(imported_photos)} photos",
-        "imported_count": len(imported_photos)
+        "message": result["message"],
+        "imported_count": result["imported_count"],
+        "errors": result["errors"],
+        "warnings": result["warnings"],
+        "success": result["success"]
     }
 
 @router.post("/{project_id}/generate-report/{template_id}")
