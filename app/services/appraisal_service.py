@@ -18,32 +18,38 @@ class AppraisalService:
                 Photo.is_deleted == False
             ).order_by(Photo.sort_order.asc()).all()
             
-            # Check if items already exist
-            existing_items = db.query(AppraisalItem).filter(
-                AppraisalItem.project_id == project_id
-            ).count()
+            # Get existing items to avoid duplicates
+            existing_photo_ids = set(
+                item.photo_id for item in db.query(AppraisalItem).filter(
+                    AppraisalItem.project_id == project_id,
+                    AppraisalItem.photo_id.isnot(None)
+                ).all()
+            )
             
-            if existing_items > 0:
-                # Return existing items
-                return db.query(AppraisalItem).filter(
-                    AppraisalItem.project_id == project_id
-                ).order_by(AppraisalItem.sort_order.asc()).all()
+            # Filter out photos that already have items
+            photos_to_process = [photo for photo in photos if photo.id not in existing_photo_ids]
             
-            # Create new items from photos
+            # Create new items from photos that don't have items yet
             items = []
-            for index, photo in enumerate(photos):
+            existing_count = db.query(AppraisalItem).filter(AppraisalItem.project_id == project_id).count()
+            
+            for index, photo in enumerate(photos_to_process):
                 item = AppraisalItem(
                     project_id=project_id,
                     photo_id=photo.id,
-                    line_number=index + 1,
-                    sort_order=index + 1,
+                    line_number=existing_count + index + 1,
+                    sort_order=existing_count + index + 1,
                     description=f"Item from {photo.original_filename}"
                 )
                 db.add(item)
                 items.append(item)
             
             db.commit()
-            return items
+            
+            # Return all items for the project (existing + new)
+            return db.query(AppraisalItem).filter(
+                AppraisalItem.project_id == project_id
+            ).order_by(AppraisalItem.sort_order.asc()).all()
             
         except Exception as e:
             db.rollback()

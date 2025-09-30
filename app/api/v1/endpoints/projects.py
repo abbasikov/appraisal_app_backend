@@ -205,6 +205,7 @@ async def get_photo_thumbnail(
 @router.post("/{project_id}/import-photos")
 async def import_photos(
     project_id: int,
+    batch_size: int = Query(10, ge=1, le=50),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -228,8 +229,8 @@ async def import_photos(
             detail="No Dropbox links configured for this project"
         )
     
-    result = PhotoService.import_photos_from_dropbox(
-        db, project_id, dropbox_links, current_user.id
+    result = PhotoService.import_photos_from_dropbox_batched(
+        db, project_id, dropbox_links, current_user.id, batch_size
     )
     
     # Handle the new detailed result format
@@ -248,9 +249,11 @@ async def import_photos(
     return {
         "message": result["message"],
         "imported_count": result["imported_count"],
+        "total_found": result.get("total_found", 0),
         "errors": result["errors"],
         "warnings": result["warnings"],
-        "success": result["success"]
+        "success": result["success"],
+        "has_more": result.get("has_more", False)
     }
 
 @router.post("/{project_id}/generate-report/{template_id}")

@@ -13,6 +13,126 @@ from app.services.dropbox_service import DropboxService
 class PhotoService:
     
     @staticmethod
+    def import_photos_from_dropbox_batched(db: Session, project_id: int, dropbox_links: List[str], user_id: int, batch_size: int = 10) -> dict:
+        """Import photos from Dropbox in batches to avoid timeouts"""
+        imported_photos = []
+        errors = []
+        warnings = []
+        dropbox_service = DropboxService()
+        
+        try:
+            # First, get all available files without downloading
+            all_files = []
+            for link in dropbox_links:
+                if not dropbox_service.validate_folder_access(link):
+                    error_msg = f"Cannot access Dropbox folder: {link}"
+                    errors.append(error_msg)
+                    continue
+                
+                files = dropbox_service.list_folder_contents(link)
+                for file_info in files:
+                    if PhotoService.is_image_file(file_info['name']):
+                        file_info['source_link'] = link
+                        all_files.append(file_info)
+            
+            # Filter out already imported files
+            new_files = []
+            for file_info in all_files:
+                existing = db.query(Photo).filter(
+                    Photo.project_id == project_id,
+                    Photo.original_filename == file_info['name'],
+                    Photo.is_deleted == False
+                ).first()
+                
+                if not existing:
+                    new_files.append(file_info)
+                else:
+                    warnings.append(f"Photo '{file_info['name']}' already exists, skipping")
+            
+            # Process only the first batch
+            files_to_process = new_files[:batch_size]
+            
+            for file_info in files_to_process:
+                # Create local directory
+                local_dir = f"uploads/projects/{project_id}/photos"
+                os.makedirs(local_dir, exist_ok=True)
+                local_path = os.path.join(local_dir, file_info['name'])
+                
+                # Download file
+                if file_info.get('from_zip', False):
+                    success = PhotoService.download_file_from_zip(file_info['source_link'], file_info['path'], local_path)
+                else:
+                    success = dropbox_service.download_file(file_info['path'], local_path, file_info['source_link'])
+                
+                if success:
+                    # Process image
+                    exif_date = PhotoService.extract_exif_date(local_path)
+                    width, height = PhotoService.get_image_dimensions(local_path)
+                    thumbnail_path = PhotoService.create_thumbnail(local_path, project_id)
+                    
+                    # Create photo record
+                    photo = Photo(
+                        project_id=project_id,
+                        original_filename=file_info['name'],
+                        file_path=local_path,
+                        thumbnail_path=thumbnail_path,
+                        file_size=file_info.get('size', 0),
+                        mime_type=PhotoService.get_mime_type(file_info['name']),
+                        width=width,
+                        height=height,
+                        exif_date=exif_date,
+                        sort_order=len(imported_photos) + 1,
+                        dropbox_file_id=file_info.get('id'),
+                        dropbox_folder_path=file_info.get('folder_path', '/'),
+                        source_folder_link=file_info['source_link']
+                    )
+                    
+                    db.add(photo)
+                    imported_photos.append(photo)
+                else:
+                    errors.append(f"Failed to download '{file_info['name']}'")
+            
+            # Commit batch
+            db.commit()
+            
+            # Log activity
+            if imported_photos:
+                activity = ActivityLog(
+                    user_id=user_id,
+                    action=f"Imported {len(imported_photos)} photos (batch) to project {project_id}",
+                    details={"project_id": project_id, "photo_count": len(imported_photos)}
+                )
+                db.add(activity)
+                db.commit()
+            
+            has_more = len(new_files) > batch_size
+            
+            return {
+                "success": True,
+                "imported_photos": imported_photos,
+                "imported_count": len(imported_photos),
+                "total_found": len(all_files),
+                "errors": errors,
+                "warnings": warnings,
+                "has_more": has_more,
+                "message": f"Imported {len(imported_photos)} photos" + (" (more available)" if has_more else "")
+            }
+            
+        except Exception as e:
+            db.rollback()
+            error_msg = f"Batch import failed: {str(e)}"
+            return {
+                "success": False,
+                "imported_photos": [],
+                "imported_count": 0,
+                "total_found": 0,
+                "errors": [error_msg],
+                "warnings": warnings,
+                "has_more": False,
+                "message": error_msg
+            }
+    
+    @staticmethod
     def import_photos_from_dropbox(db: Session, project_id: int, dropbox_links: List[str], user_id: int) -> dict:
         """Import photos from multiple Dropbox links - returns dict with results and errors"""
         imported_photos = []
