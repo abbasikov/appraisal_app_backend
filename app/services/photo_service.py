@@ -398,16 +398,54 @@ class PhotoService:
         return mime_types.get(ext, 'image/jpeg')
     
     @staticmethod
-    def get_photos_by_project(db: Session, project_id: int) -> List[Photo]:
-        """Get all photos for a project, ordered by EXIF date (chronological order)"""
+    def get_photos_by_project(db: Session, project_id: int, skip: int = 0, limit: int = None) -> List[Photo]:
+        """Get photos for a project, ordered by EXIF date (chronological order) with pagination"""
         try:
-            return db.query(Photo).filter(
+            query = db.query(Photo).filter(
                 Photo.project_id == project_id,
                 Photo.is_deleted == False
-            ).order_by(Photo.exif_date.asc().nullslast(), Photo.sort_order.asc()).all()
+            ).order_by(Photo.exif_date.asc().nullslast(), Photo.sort_order.asc())
+            
+            if limit is not None:
+                query = query.offset(skip).limit(limit)
+            
+            return query.all()
         except Exception as e:
             print(f"❌ Error fetching photos: {e}")
             return []
+    
+    @staticmethod
+    def get_photos_by_project_with_pagination(db: Session, project_id: int, skip: int = 0, limit: int = 20) -> dict:
+        """Get photos for a project with pagination metadata"""
+        try:
+            # Get total count
+            total_count = db.query(Photo).filter(
+                Photo.project_id == project_id,
+                Photo.is_deleted == False
+            ).count()
+            
+            # Get paginated results
+            photos = PhotoService.get_photos_by_project(db, project_id, skip, limit)
+            
+            # Check if there are more photos
+            has_more = (skip + limit) < total_count if limit else False
+            
+            return {
+                "photos": photos,
+                "total_count": total_count,
+                "skip": skip,
+                "limit": limit,
+                "has_more": has_more
+            }
+        except Exception as e:
+            print(f"❌ Error fetching paginated photos: {e}")
+            return {
+                "photos": [],
+                "total_count": 0,
+                "skip": skip,
+                "limit": limit,
+                "has_more": False
+            }
     
     @staticmethod
     def download_file_from_zip(share_link: str, zip_file_path: str, local_path: str) -> bool:

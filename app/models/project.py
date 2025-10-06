@@ -52,6 +52,7 @@ class Project(Base):
     appraisal_items = relationship("AppraisalItem", back_populates="project")
     reports = relationship("Report", back_populates="project")
     activity_logs = relationship("ActivityLog", back_populates="project")
+    task_statuses = relationship("TaskStatus", back_populates="project")
 
     def __repr__(self):
         return f"<Project(id={self.id}, name='{self.project_name}', status='{self.status.value}')>"

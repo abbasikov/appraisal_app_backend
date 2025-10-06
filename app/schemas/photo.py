@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 class PhotoResponse(BaseModel):
@@ -16,6 +16,16 @@ class PhotoResponse(BaseModel):
     dropbox_folder_path: Optional[str] = None
     source_folder_link: Optional[str] = None
     created_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+class PaginatedPhotosResponse(BaseModel):
+    photos: List[PhotoResponse]
+    total_count: int
+    skip: int
+    limit: int
+    has_more: bool
     
     class Config:
         from_attributes = True

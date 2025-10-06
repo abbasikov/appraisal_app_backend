@@ -2,6 +2,7 @@ import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
+from app.core.celery_app import celery_app
 from app.api.v1.api import api_router
 from app.db.init_db import create_tables
 from app.core.scheduler import cleanup_task
@@ -34,6 +35,11 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 @app.get("/")
 async def root():
     return {"message": "Appraisal App API is running"}
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for load balancers"""
+    return {"status": "healthy", "celery": "configured"}
 
 if __name__ == "__main__":
     import uvicorn
