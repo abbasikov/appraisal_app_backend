@@ -3,13 +3,16 @@ from sqlalchemy.orm import Session
 from typing import List
 from app.db.database import get_db
 from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse
-from app.schemas.photo import PhotoResponse
+from app.schemas.photo import PhotoResponse, PaginatedPhotosResponse
+from app.schemas.task import TaskStatusResponse, BackgroundPhotoImportRequest, BackgroundPhotoImportResponse
 from app.services.project_service import ProjectService
 from app.services.photo_service import PhotoService
 from app.services.template_service import TemplateService
 from app.core.deps import get_current_user
 from app.models.user import User, UserRole
 from app.models.photo import Photo
+from app.models.task_status import TaskStatus
+from app.tasks.photo_tasks import import_photos_background, import_photos_recurring_batches
 import os
 
 router = APIRouter()
@@ -173,14 +176,16 @@ async def delete_project(
     
     return {"message": "Project deleted successfully"}
 
-@router.get("/{project_id}/photos", response_model=List[PhotoResponse])
+@router.get("/{project_id}/photos", response_model=PaginatedPhotosResponse)
 async def get_project_photos(
     project_id: int,
+    skip: int = Query(0, ge=0, description="Number of photos to skip"),
+    limit: int = Query(20, ge=1, le=100, description="Maximum number of photos to return"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    photos = PhotoService.get_photos_by_project(db, project_id)
-    return photos
+    result = PhotoService.get_photos_by_project_with_pagination(db, project_id, skip, limit)
+    return PaginatedPhotosResponse(**result)
 
 @router.get("/{project_id}/photos/{photo_id}/thumbnail")
 async def get_photo_thumbnail(
@@ -319,4 +324,129 @@ async def download_project_report(
         filename=filename, 
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
+
+@router.post("/{project_id}/import-photos-background", response_model=BackgroundPhotoImportResponse)
+async def import_photos_background_endpoint(
+    project_id: int,
+    request: BackgroundPhotoImportRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Import photos from Dropbox in the background to prevent server blocking
+    """
+    if current_user.role not in [UserRole.ADMIN, UserRole.EDITOR]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    project = ProjectService.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    dropbox_links = project.get('dropbox_links', [])
+    if not dropbox_links:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No Dropbox links configured for this project"
+        )
+    
+    # Choose the appropriate background task (batch_size will be calculated automatically)
+    if request.recurring:
+        # Use recurring batches to process all photos
+        task = import_photos_recurring_batches.delay(
+            project_id, dropbox_links, current_user.id, None  # None = auto-calculate batch size
+        )
+        estimated_duration = "Duration varies based on optimal batch sizing"
+        auto_batching_info = "Large photos will use smaller batches, small photos will use larger batches"
+    else:
+        # Use single batch processing
+        task = import_photos_background.delay(
+            project_id, dropbox_links, current_user.id, None  # None = auto-calculate batch size
+        )
+        estimated_duration = "Duration varies based on optimal batch sizing"
+        auto_batching_info = "Batch size calculated automatically based on file sizes and server load"
+    
+    return BackgroundPhotoImportResponse(
+        task_id=task.id,
+        message=f"Photo import task started{' (recurring batches)' if request.recurring else ''}",
+        project_id=project_id,
+        recurring=request.recurring,
+        estimated_duration=estimated_duration,
+        auto_batching_info=auto_batching_info
+    )
+
+@router.get("/{project_id}/task-status/{task_id}", response_model=TaskStatusResponse)
+async def get_task_status(
+    project_id: int,
+    task_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get the status of a background photo import task
+    """
+    if current_user.role not in [UserRole.ADMIN, UserRole.EDITOR]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    # Verify the project exists
+    project = ProjectService.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    # Get task status
+    task_status = db.query(TaskStatus).filter(
+        TaskStatus.task_id == task_id,
+        TaskStatus.project_id == project_id,
+        TaskStatus.user_id == current_user.id
+    ).first()
+    
+    if not task_status:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Task not found"
+        )
+    
+    return task_status
+
+@router.get("/{project_id}/tasks", response_model=List[TaskStatusResponse])
+async def get_project_tasks(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get all background tasks for a project
+    """
+    if current_user.role not in [UserRole.ADMIN, UserRole.EDITOR]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions"
+        )
+    
+    # Verify the project exists
+    project = ProjectService.get_project_by_id(db, project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found"
+        )
+    
+    # Get all tasks for the project
+    tasks = db.query(TaskStatus).filter(
+        TaskStatus.project_id == project_id,
+        TaskStatus.user_id == current_user.id
+    ).order_by(TaskStatus.created_at.desc()).all()
+    
+    return tasks
 

@@ -36,6 +36,7 @@ class User(Base):
     # Relationships
     assigned_projects = relationship("Project", back_populates="assigned_user")
     activity_logs = relationship("ActivityLog", back_populates="user")
+    task_statuses = relationship("TaskStatus", back_populates="user")
 
     @property
     def full_name(self):

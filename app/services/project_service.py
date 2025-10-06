@@ -210,6 +210,12 @@ class ProjectService:
             from app.models.activity_log import ActivityLog
             from app.models.report import Report
             
+            # Delete task statuses first (since they have NOT NULL constraint on project_id)
+            # Use raw SQL to avoid circular import issues with relationships
+            from sqlalchemy import text
+            task_statuses_deleted = db.execute(text("DELETE FROM task_status WHERE project_id = :project_id"), {"project_id": project_id})
+            print(f"Deleted {task_statuses_deleted.rowcount} task status records")
+            
             # Delete photos
             photos_deleted = db.query(Photo).filter(Photo.project_id == project_id).delete()
             print(f"Deleted {photos_deleted} photos")

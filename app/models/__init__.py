@@ -10,6 +10,7 @@ from .template import Template
 from .metals_price import MetalsPrice
 from .activity_log import ActivityLog
 from .verification_code import VerificationCode
+from .task_status import TaskStatus
 
 # Legacy models (keeping for backward compatibility)
 from .property import Property
