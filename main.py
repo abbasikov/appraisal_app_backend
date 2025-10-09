@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
@@ -6,6 +8,22 @@ from app.core.celery_app import celery_app
 from app.api.v1.api import api_router
 from app.db.init_db import create_tables
 from app.core.scheduler import cleanup_task
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('app.log')
+    ]
+)
+
+# Set specific loggers to DEBUG level
+logging.getLogger('app.utils.template_converter').setLevel(logging.DEBUG)
+logging.getLogger('app.services.template_service').setLevel(logging.DEBUG)
+logging.getLogger('uvicorn').setLevel(logging.INFO)
+logging.getLogger('uvicorn.access').setLevel(logging.INFO)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -16,9 +34,13 @@ app = FastAPI(
 # Initialize database tables on startup
 @app.on_event("startup")
 async def startup_event():
+    logger = logging.getLogger(__name__)
+    logger.info("Starting Appraisal App API...")
+    logger.info("Logging configured - DEBUG level enabled")
     create_tables()
     # Start background cleanup task
     asyncio.create_task(cleanup_task())
+    logger.info("Startup completed successfully")
 
 # CORS middleware
 app.add_middleware(

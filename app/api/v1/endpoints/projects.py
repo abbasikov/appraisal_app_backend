@@ -265,7 +265,7 @@ async def import_photos(
 async def generate_project_report(
     project_id: int,
     template_id: int,
-    report_type: str = "draft",
+    report_type: str = "final",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -298,7 +298,7 @@ async def generate_project_report(
 async def download_project_report(
     project_id: int,
     template_id: int,
-    report_type: str = "draft",
+    report_type: str = "final",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):

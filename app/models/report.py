@@ -15,7 +15,7 @@ class Report(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     template_id = Column(Integer, ForeignKey("templates.id"))
     template_name = Column(String, nullable=False)
-    report_type = Column(Enum(ReportType), default=ReportType.DRAFT)
+    report_type = Column(Enum(ReportType), default=ReportType.FINAL)
     file_path = Column(String)
     pdf_path = Column(String)
     word_path = Column(String)

@@ -26,7 +26,7 @@ class FieldMappingUpdate(BaseModel):
 
 class ReportGenerationRequest(BaseModel):
     project_id: int
-    report_type: str = "draft"
+    report_type: str = "final"
     include_photos: bool = True
 
 class TemplateListResponse(BaseModel):
