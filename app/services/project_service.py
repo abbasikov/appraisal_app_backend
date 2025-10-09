@@ -216,13 +216,13 @@ class ProjectService:
             task_statuses_deleted = db.execute(text("DELETE FROM task_status WHERE project_id = :project_id"), {"project_id": project_id})
             print(f"Deleted {task_statuses_deleted.rowcount} task status records")
             
-            # Delete photos
-            photos_deleted = db.query(Photo).filter(Photo.project_id == project_id).delete()
-            print(f"Deleted {photos_deleted} photos")
-            
-            # Delete appraisal items
+            # Delete appraisal items first (they reference photos via photo_id)
             items_deleted = db.query(AppraisalItem).filter(AppraisalItem.project_id == project_id).delete()
             print(f"Deleted {items_deleted} appraisal items")
+            
+            # Delete photos after appraisal items (no more references)
+            photos_deleted = db.query(Photo).filter(Photo.project_id == project_id).delete()
+            print(f"Deleted {photos_deleted} photos")
             
             # Delete reports
             reports_deleted = db.query(Report).filter(Report.project_id == project_id).delete()

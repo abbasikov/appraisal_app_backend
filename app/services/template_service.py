@@ -109,7 +109,7 @@ class TemplateService:
     
     @staticmethod
     def generate_report(db: Session, template_id: int, project_id: int, 
-                       report_type: str = "draft") -> str:
+                       report_type: str = "final") -> str:
         """Generate report from template and project data"""
         try:
             template = db.query(Template).filter(Template.id == template_id).first()
@@ -126,8 +126,25 @@ class TemplateService:
                 AppraisalItem.project_id == project_id
             ).order_by(AppraisalItem.sort_order).all()
             
+            # Get all photos for this project
+            from app.models.photo import Photo
+            all_project_photos = db.query(Photo).filter(
+                Photo.project_id == project_id,
+                Photo.is_deleted == False
+            ).order_by(Photo.sort_order.asc()).all()
+            
             # Calculate total value from items
             total_value = sum(item.appraised_value or 0 for item in appraisal_items)
+            
+            # Debug client data
+            logger.info(f"Client data from database:")
+            if project.client:
+                logger.info(f"  - case_name: '{project.client.case_name}'")
+                logger.info(f"  - case_number: '{project.client.case_number}'")
+                logger.info(f"  - date_of_death: '{project.client.date_of_death}'")
+                logger.info(f"  - attorney_name: '{project.client.attorney_name}'")
+            else:
+                logger.warning("No client data found for project")
             
             project_data = {
                 "project_name": project.project_name,
@@ -143,7 +160,11 @@ class TemplateService:
                     "address": f"{project.client.address or ''} {project.client.city or ''} {project.client.state or ''} {project.client.zip_code or ''}" if project.client else "",
                     "email": project.client.email if project.client else "",
                     "phone": project.client.phone if project.client else "",
-                    "date_of_death": str(project.client.date_of_death) if project.client and project.client.date_of_death else ""
+                    "date_of_death": str(project.client.date_of_death) if project.client and project.client.date_of_death else "",
+                    "case_name": project.client.case_name if project.client else "",
+                    "case_number": project.client.case_number if project.client else "",
+                    "attorney_email": project.client.attorney_email if project.client else "",
+                    "attorney_phone": project.client.attorney_phone if project.client else ""
                 },
                 "appraisal_items": [
                     {
@@ -158,6 +179,15 @@ class TemplateService:
                         "photo_path": item.photo.file_path if item.photo else None,
                         "photo_thumbnail": item.photo.thumbnail_path if item.photo else None
                     } for item in appraisal_items
+                ],
+                "all_project_photos": [
+                    {
+                        "id": photo.id,
+                        "file_path": photo.file_path,
+                        "thumbnail_path": photo.thumbnail_path,
+                        "original_filename": photo.original_filename,
+                        "sort_order": photo.sort_order
+                    } for photo in all_project_photos
                 ]
             }
             
@@ -171,9 +201,11 @@ class TemplateService:
             
             template_path = template.fillable_file_path or template.file_path
             
+            logger.info(f"Generating report with report_type='{report_type}', add_watermark={report_type == 'draft'}")
             generated_path = generate_report_from_template(
                 template_path, output_path, 
-                template.field_mappings or {}, project_data
+                template.field_mappings or {}, project_data,
+                add_watermark=(report_type == "draft")
             )
             
             report = Report(
@@ -224,7 +256,8 @@ class TemplateService:
         from app.utils.template_converter import generate_report_from_template
         generated_path = generate_report_from_template(
             template_path, output_path, 
-            template.field_mappings or {}, {'field_mappings': mock_data}
+            template.field_mappings or {}, {'field_mappings': mock_data},
+            add_watermark=False  # No watermark for template generation
         )
         
         return generated_path
