@@ -16,6 +16,15 @@ def create_test_users():
         test_users = [
             # Admin Users
             {
+                "username": "admin123",
+                "email": "admin@testing.com",
+                "password": "admin123",
+                "first_name": "System",
+                "last_name": "Administrator",
+                "phone": "+1-555-0001",
+                "role": UserRole.ADMIN
+            },
+            {
                 "username": "admin",
                 "email": "admin@appraisal.com",
                 "password": "admin123",

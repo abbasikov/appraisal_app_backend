@@ -7,6 +7,7 @@ from app.models.user import User
 from app.services.appraisal_service import AppraisalService
 from app.schemas.appraisal_item import AppraisalItemUpdate, AppraisalItemReorder, AppraisalSchemaResponse
 from app.schemas.appraisal_constants import ROOM_AREA_OPTIONS, FLOOR_BUILDING_OPTIONS, ITEM_TYPE_OPTIONS, TYPE_ATTRIBUTES, REQUIRED_ATTRIBUTES
+from app.schemas.item_description_templates import get_description_template, ITEM_DESCRIPTION_TEMPLATES
 
 router = APIRouter()
 
@@ -18,8 +19,15 @@ async def get_appraisal_schema():
         floor_building_options=FLOOR_BUILDING_OPTIONS,
         item_type_options=ITEM_TYPE_OPTIONS,
         type_attributes=TYPE_ATTRIBUTES,
-        required_attributes=REQUIRED_ATTRIBUTES
+        required_attributes=REQUIRED_ATTRIBUTES,
+        description_templates=ITEM_DESCRIPTION_TEMPLATES
     )
+
+@router.get("/description-template/{item_type}")
+async def get_description_template_for_type(item_type: str):
+    """Get description template for specific item type"""
+    template = get_description_template(item_type)
+    return {"template": template, "item_type": item_type}
 
 @router.post("/projects/{project_id}/appraisal-items/initialize")
 async def initialize_appraisal_items(
