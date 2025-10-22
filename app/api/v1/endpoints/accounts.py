@@ -12,6 +12,8 @@ from app.schemas.account import (
     AccountListResponse
 )
 from app.schemas.client import ClientCreate, ClientResponse
+from app.models.account import AccountType
+from typing import Union
 
 router = APIRouter()
 
@@ -29,16 +31,45 @@ def list_accounts(
         total=len(accounts)
     )
 
-@router.post("/", response_model=AccountResponse)
+@router.post("/", response_model=Union[AccountResponse, ClientResponse])
 def create_account(
     account_data: AccountCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Create new account"""
+    """Create new account or client based on account_type"""
     if current_user.role not in [UserRole.ADMIN, UserRole.EDITOR]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     
+    # If account_type is 'client', create a client record instead
+    print(f"DEBUG: account_type = {account_data.account_type}, AccountType.CLIENT = {AccountType.CLIENT}")
+    print(f"DEBUG: Comparison result = {account_data.account_type == AccountType.CLIENT}")
+    
+    if account_data.account_type == AccountType.CLIENT:
+        print("DEBUG: Creating client record instead of account")
+        # Convert account data to client data
+        client_data = ClientCreate(
+            name=account_data.name,
+            email=account_data.email,
+            phone=account_data.phone,
+            address=account_data.address,
+            city=account_data.city,
+            state=account_data.state,
+            zip_code=account_data.zip_code,
+            parent_account_id=account_data.parent_account_id,
+            notes=account_data.notes
+        )
+        
+        client = ClientService.create_client(db, client_data, current_user.id)
+        if not client:
+            raise HTTPException(status_code=400, detail="Failed to create client")
+        
+        print(f"DEBUG: Client created successfully with ID {client.id}")
+        return ClientResponse.model_validate(client)
+    
+    print("DEBUG: Creating regular account")
+    
+    # Otherwise, create a regular account
     account = AccountService.create_account(db, account_data)
     return AccountResponse.model_validate(account)
 

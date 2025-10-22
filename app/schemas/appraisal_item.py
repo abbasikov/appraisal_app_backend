@@ -95,3 +95,4 @@ class AppraisalSchemaResponse(BaseModel):
     item_type_options: List[str]
     type_attributes: Dict[str, List[str]]
     required_attributes: Dict[str, List[str]]
+    description_templates: Optional[Dict[str, str]] = {}
