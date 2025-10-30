@@ -225,6 +225,8 @@ class TemplateService:
         except Exception as e:
             db.rollback()
             logger.error(f"Report generation failed: {str(e)}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Report generation failed: {str(e)}")
     
     @staticmethod
