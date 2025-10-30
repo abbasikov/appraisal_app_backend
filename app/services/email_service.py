@@ -54,6 +54,53 @@ class EmailService:
             raise e
     
     @staticmethod
+    def send_import_completion_email(email: str, project_name: str, imported_count: int, total_found: int = None):
+        """Send photo import completion notification email"""
+        try:
+            subject = f"Photo Import Complete - {project_name}"
+            
+            total_text = f" out of {total_found}" if total_found and total_found != imported_count else ""
+            
+            html_body = f"""
+            <html>
+            <body>
+                <h2>Photo Import Complete!</h2>
+                <p>Your photo import for project <strong>{project_name}</strong> has been completed successfully.</p>
+                <p><strong>Import Summary:</strong></p>
+                <ul>
+                    <li>Photos imported: {imported_count}{total_text}</li>
+                    <li>Status: Complete</li>
+                </ul>
+                <p>You can now view and work with the imported photos in your project.</p>
+                <br>
+                <p>Best regards,<br>Appraisal Report Management System</p>
+            </body>
+            </html>
+            """
+            
+            text_body = f"""
+            Photo Import Complete!
+            
+            Your photo import for project "{project_name}" has been completed successfully.
+            
+            Import Summary:
+            - Photos imported: {imported_count}{total_text}
+            - Status: Complete
+            
+            You can now view and work with the imported photos in your project.
+            
+            Best regards,
+            Appraisal Report Management System
+            """
+            
+            EmailService._send_email(email, subject, text_body, html_body)
+            print(f"✅ Import completion email sent to {email}")
+            
+        except Exception as e:
+            print(f"❌ Failed to send import completion email: {e}")
+            # Don't raise - email failure shouldn't break the import process
+    
+    @staticmethod
     def _send_email(to_email: str, subject: str, text_body: str, html_body: str = None):
         """Send email using SMTP"""
         try:

@@ -134,7 +134,7 @@ async def update_project(
 @router.post("/{project_id}/dropbox-links")
 async def update_dropbox_links(
     project_id: int,
-    folder_links: List[str],
+    request_data: dict,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -145,7 +145,18 @@ async def update_dropbox_links(
             detail="Not enough permissions"
         )
     
-    project = ProjectService.update_dropbox_links(db, project_id, folder_links, current_user.id)
+    # Extract folder_links and notification_email from request
+    folder_links = request_data.get('folder_links', [])
+    notification_email = request_data.get('notification_email')
+    
+    # Validate notification_email if provided
+    if notification_email and '@' not in notification_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid email address"
+        )
+    
+    project = ProjectService.update_dropbox_links(db, project_id, folder_links, current_user.id, notification_email)
     if not project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -277,6 +288,14 @@ async def generate_project_report(
         )
     
     try:
+        # Check if project exists
+        project = ProjectService.get_project_by_id(db, project_id)
+        if not project:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found"
+            )
+        
         report_path = TemplateService.generate_report(
             db, template_id, project_id, report_type
         )
@@ -288,7 +307,10 @@ async def generate_project_report(
             "project_id": project_id,
             "download_url": f"/api/v1/projects/{project_id}/download-report/{template_id}?report_type={report_type}"
         }
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"Report generation error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Report generation failed: {str(e)}"

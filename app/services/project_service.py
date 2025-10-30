@@ -95,6 +95,7 @@ class ProjectService:
                 "status": project.status.value,
                 "dropbox_folder_link": project.dropbox_folder_link,
                 "dropbox_links": project.dropbox_folder_link.split("|") if project.dropbox_folder_link else [],
+                "notification_email": project.notification_email,
                 "total_value": float(project.total_value) if project.total_value else 0,
                 "item_count": project.item_count,
                 "notes": project.notes,
@@ -136,6 +137,7 @@ class ProjectService:
             "status": project.status.value,
             "dropbox_folder_link": project.dropbox_folder_link,
             "dropbox_links": project.dropbox_folder_link.split("|") if project.dropbox_folder_link else [],
+            "notification_email": project.notification_email,
             "total_value": float(project.total_value) if project.total_value else 0,
             "item_count": project.item_count,
             "notes": project.notes,
@@ -169,7 +171,7 @@ class ProjectService:
         return project
     
     @staticmethod
-    def update_dropbox_links(db: Session, project_id: int, folder_links: List[str], user_id: int) -> Optional[Project]:
+    def update_dropbox_links(db: Session, project_id: int, folder_links: List[str], user_id: int, notification_email: str = None) -> Optional[Project]:
         project = db.query(Project).filter(Project.id == project_id).first()
         if not project:
             return None
@@ -177,6 +179,9 @@ class ProjectService:
         # Store up to 10 Dropbox folder links
         links_str = "|".join(folder_links[:10]) if folder_links else None
         project.dropbox_folder_link = links_str
+        
+        # Update notification email
+        project.notification_email = notification_email
         
         db.commit()
         db.refresh(project)
@@ -186,7 +191,7 @@ class ProjectService:
             user_id=user_id,
             project_id=project_id,
             action=f"Updated Dropbox links for project: {project.project_name}",
-            details={"links_count": len(folder_links)}
+            details={"links_count": len(folder_links), "notification_email": bool(notification_email)}
         )
         db.add(activity)
         db.commit()

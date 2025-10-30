@@ -9,7 +9,9 @@ from sqlalchemy.pool import StaticPool
 from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.services.photo_service import PhotoService
+from app.services.email_service import EmailService
 from app.models.task_status import TaskStatus
+from app.models.project import Project
 from app.db.database import get_db
 
 @celery_app.task(bind=True, name="import_photos_background")
@@ -86,6 +88,20 @@ def import_photos_background(self, project_id: int, dropbox_links: List[str], us
             result.get("imported_count", 0),
             result.get("total_found", 0) if "total_found" in result else result.get("imported_count", 0)
         )
+        
+        # Send email notification if import was successful
+        if result["success"] and result.get("imported_count", 0) > 0:
+            try:
+                project = db.query(Project).filter(Project.id == project_id).first()
+                if project and project.notification_email:
+                    EmailService.send_import_completion_email(
+                        project.notification_email,
+                        project.project_name,
+                        result.get("imported_count", 0),
+                        result.get("total_found")
+                    )
+            except Exception as email_error:
+                print(f"⚠️ Email notification failed: {email_error}")
         
         return result
         
@@ -248,6 +264,19 @@ def import_photos_recurring_batches(self, project_id: int, dropbox_links: List[s
             100 if final_result["success"] else 70,  # 70% if failed partway
             json.dumps(final_result)
         )
+        
+        # Send email notification if import was successful
+        if final_result["success"] and total_imported > 0:
+            try:
+                project = db.query(Project).filter(Project.id == project_id).first()
+                if project and project.notification_email:
+                    EmailService.send_import_completion_email(
+                        project.notification_email,
+                        project.project_name,
+                        total_imported
+                    )
+            except Exception as email_error:
+                print(f"⚠️ Email notification failed: {email_error}")
         
         return final_result
         

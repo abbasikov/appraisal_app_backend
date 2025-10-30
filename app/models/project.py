@@ -34,6 +34,7 @@ class Project(Base):
     report_date = Column(Date)
     dropbox_folder_link = Column(String)
     dropbox_folder_id = Column(String)
+    notification_email = Column(String)  # Email for import notifications
     status = Column(Enum(ProjectStatus), default=ProjectStatus.DRAFT)
     total_value = Column(Numeric(12, 2), default=0.00)
     item_count = Column(Integer, default=0)
