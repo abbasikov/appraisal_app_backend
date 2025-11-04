@@ -33,6 +33,7 @@ class ProjectService:
                 purpose=project.purpose.strip() if project.purpose else None,
                 inspection_date=project.inspection_date,
                 report_date=project.report_date,
+                template_id=project.template_id,
                 notes=project.notes.strip() if project.notes else None
             )
             
@@ -96,6 +97,7 @@ class ProjectService:
                 "dropbox_folder_link": project.dropbox_folder_link,
                 "dropbox_links": project.dropbox_folder_link.split("|") if project.dropbox_folder_link else [],
                 "notification_email": project.notification_email,
+                "template_id": project.template_id,
                 "total_value": float(project.total_value) if project.total_value else 0,
                 "item_count": project.item_count,
                 "notes": project.notes,
@@ -138,6 +140,7 @@ class ProjectService:
             "dropbox_folder_link": project.dropbox_folder_link,
             "dropbox_links": project.dropbox_folder_link.split("|") if project.dropbox_folder_link else [],
             "notification_email": project.notification_email,
+            "template_id": project.template_id,
             "total_value": float(project.total_value) if project.total_value else 0,
             "item_count": project.item_count,
             "notes": project.notes,
