@@ -27,6 +27,7 @@ class ProjectCreate(BaseModel):
     inspection_date: Optional[date] = None
     report_date: Optional[date] = None
     assigned_user_id: Optional[int] = None
+    template_id: Optional[int] = None
     notes: Optional[str] = None
 
 class ProjectUpdate(BaseModel):
@@ -38,6 +39,7 @@ class ProjectUpdate(BaseModel):
     inspection_date: Optional[date] = None
     report_date: Optional[date] = None
     assigned_user_id: Optional[int] = None
+    template_id: Optional[int] = None
     status: Optional[ProjectStatus] = None
     dropbox_folder_link: Optional[str] = None
     notes: Optional[str] = None
@@ -57,6 +59,7 @@ class ProjectResponse(BaseModel):
     status: str
     dropbox_folder_link: Optional[str] = None
     dropbox_links: List[str] = []
+    template_id: Optional[int] = None
     total_value: Optional[float] = 0
     item_count: int = 0
     notes: Optional[str] = None
