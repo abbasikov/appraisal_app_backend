@@ -192,7 +192,7 @@ def generate_report_from_template(template_path: str, output_path: str,
         
         # Add watermark if requested
         if add_watermark:
-            add_watermark_centered(doc)
+            _add_watermark(doc)
         
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         doc.save(output_path)
