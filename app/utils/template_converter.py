@@ -6,6 +6,7 @@ from docx.shared import Inches, RGBColor, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.oxml.shared import OxmlElement, qn
+from docx.oxml import parse_xml
 import logging
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -186,13 +187,22 @@ def generate_report_from_template(template_path: str, output_path: str,
         _final_placeholder_check(doc, field_mappings, project_data)
         logger.info("🔍🔍🔍 FINAL PLACEHOLDER CHECK COMPLETED 🔍🔍🔍")
         
-        # Remove any existing watermarks from the template only if we're not adding a new one
-        if not add_watermark:
-            _remove_existing_watermarks(doc)
+        # ALWAYS remove any existing watermarks from the template first
+        logger.info("🚫🚫🚫 REMOVING EXISTING WATERMARKS FROM TEMPLATE 🚫🚫🚫")
+        _remove_existing_watermarks(doc)
+        logger.info("🚫🚫🚫 WATERMARK REMOVAL COMPLETED 🚫🚫🚫")
         
-        # Add watermark if requested
+        # Add watermark if requested (for draft reports)
+        logger.info(f"📝 add_watermark parameter value: {add_watermark}")
         if add_watermark:
-            _add_watermark(doc)
+            logger.info("💧💧💧 ADDING DRAFT WATERMARK (add_watermark=True) 💧💧💧")
+            watermark_success = _add_watermark(doc)
+            if watermark_success:
+                logger.info("✅✅✅ DRAFT WATERMARK SUCCESSFULLY ADDED ✅✅✅")
+            else:
+                logger.error("❌❌❌ DRAFT WATERMARK ADDITION FAILED ❌❌❌")
+        else:
+            logger.info("⏭️ SKIPPING WATERMARK (add_watermark=False) - Final Report ⏭️")
         
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         doc.save(output_path)
@@ -1863,440 +1873,596 @@ def _is_valid_image(image_path: str) -> bool:
         return False
 
 def _add_watermark(doc: Document):
-    """Add DRAFT watermark to document as a true background watermark"""
+    """Add DRAFT watermark as a true background watermark using VML shape with textbox"""
     try:
-        logger.info("Adding true background DRAFT watermark to document")
+        logger.info("💧💧💧 Adding DRAFT watermark using VML shape with textbox 💧💧💧")
+        logger.info(f"Document has {len(doc.sections)} sections")
         
-        # Create a true watermark using a simpler approach
-        try:
-            for section_idx, section in enumerate(doc.sections):
-                # Get the header part
-                header_part = section.header
-                
-                # Create a paragraph for the watermark
-                watermark_p = header_part.add_paragraph()
-                watermark_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                
-                # Add a run with the watermark text
-                run = watermark_p.add_run("DRAFT")
-                run.font.size = Pt(120)  # Very large font
-                run.font.bold = True
-                run.font.color.rgb = RGBColor(192, 192, 192)  # Light gray
-                
-                # Try to position it behind text using Word's XML
-                try:
-                    # Get the paragraph element
-                    p_element = watermark_p._p
-                    
-                    # Add paragraph properties
-                    pPr = p_element.get_or_add_pPr()
-                    
-                    # Create frame properties for positioning
-                    framePr = OxmlElement('w:framePr')
-                    framePr.set(qn('w:wrap'), 'through')  # Text wraps through the frame
-                    framePr.set(qn('w:vAnchor'), 'page')  # Anchor to page
-                    framePr.set(qn('w:hAnchor'), 'page')  # Anchor to page
-                    framePr.set(qn('w:yAlign'), 'center')  # Center vertically
-                    framePr.set(qn('w:xAlign'), 'center')  # Center horizontally
-                    pPr.append(framePr)
-                    
-                    # Set text wrapping
-                    textWrapping = OxmlElement('w:textWrapping')
-                    textWrapping.set(qn('w:val'), 'around')  # Text wraps around
-                    pPr.append(textWrapping)
-                    
-                    # Try to set z-order to be behind text
-                    try:
-                        # Add a custom style for the paragraph
-                        style = OxmlElement('w:pStyle')
-                        style.set(qn('w:val'), 'Watermark')
-                        pPr.append(style)
-                        
-                        # Add a vanish property to make it appear behind text
-                        rPr = OxmlElement('w:rPr')
-                        vanish = OxmlElement('w:vanish')
-                        rPr.append(vanish)
-                        p_element.append(rPr)
-                    except Exception as style_error:
-                        logger.warning(f"Could not set watermark style: {str(style_error)}")
-                    
-                    logger.info(f"Added positioned watermark to section {section_idx+1}")
-                except Exception as pos_error:
-                    logger.warning(f"Could not position watermark: {str(pos_error)}")
-            
-            logger.info("Successfully added watermarks")
-            return True
-        except Exception as watermark_error:
-            logger.error(f"Main watermark approach failed: {str(watermark_error)}")
-
+        watermarks_added = 0
         
-        # Fallback to the drawing approach
-        logger.info("Falling back to drawing approach")
-        
-        # Use Word's drawing canvas to create a true watermark
+        # Add watermark to EVERY section
         for section_idx, section in enumerate(doc.sections):
-            logger.info(f"Processing section {section_idx+1} of {len(doc.sections)}")
-
-            
-            # Get the header part for this section (create if needed)
-            header_part = section.header
-            
-            # Create a new paragraph for the watermark
-            watermark_p = header_part.add_paragraph()
-            
-            # Create the watermark drawing using Word's XML directly
-            # This creates a true watermark that appears behind text
             try:
-                # Create the VML object with proper namespace declarations
-                r = watermark_p._p.add_r()
-                drawing = OxmlElement('w:drawing')
-                r.append(drawing)
+                logger.info(f"📍 Processing section {section_idx+1}/{len(doc.sections)}")
                 
-                # Create the main drawing container
-                inline = OxmlElement('wp:inline')
-                drawing.append(inline)
+                # Check if header exists
+                if not section.header:
+                    logger.warning(f"  Section {section_idx+1} has no header, skipping")
+                    continue
                 
-                # Set size and position
-                extent = OxmlElement('wp:extent')
-                extent.set('cx', '7772400')  # Width in EMUs (7.5 inches)
-                extent.set('cy', '7772400')  # Height in EMUs (7.5 inches)
-                inline.append(extent)
+                # Get the header and unlink from previous section
+                logger.info(f"  Accessing header for section {section_idx+1}")
+                header = section.header
+                logger.info(f"  Header type: {type(header)}")
                 
-                # Set effect extent (padding)
-                effectExtent = OxmlElement('wp:effectExtent')
-                effectExtent.set('l', '0')
-                effectExtent.set('t', '0')
-                effectExtent.set('r', '0')
-                effectExtent.set('b', '0')
-                inline.append(effectExtent)
+                logger.info(f"  Unlinking header from previous section")
+                header.is_linked_to_previous = False
                 
-                # Create the docPr element (drawing properties)
-                docPr = OxmlElement('wp:docPr')
-                docPr.set('id', f'{1000 + section_idx}')
-                docPr.set('name', f'Watermark {section_idx}')
-                inline.append(docPr)
+                # Add paragraph to header
+                logger.info(f"  Adding paragraph to header")
+                header_para = header.add_paragraph()
+                logger.info(f"  Header paragraph created: {type(header_para)}")
                 
-                # Create the graphic element
-                graphic = OxmlElement('a:graphic')
-                graphic.set('xmlns:a', 'http://schemas.openxmlformats.org/drawingml/2006/main')
-                inline.append(graphic)
+                # Create VML watermark using parse_xml with complete XML
+                logger.info(f"  Creating VML watermark with parse_xml")
                 
-                # Create the graphic data element
-                graphicData = OxmlElement('a:graphicData')
-                graphicData.set('uri', 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape')
-                graphic.append(graphicData)
+                # Define namespace URIs
+                w_ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+                v_ns = 'urn:schemas-microsoft-com:vml'
+                o_ns = 'urn:schemas-microsoft-com:office:office'
                 
-                # Create the WordProcessingShape element
-                wps_shape = OxmlElement('wps:wsp')
-                wps_shape.set('xmlns:wps', 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape')
-                graphicData.append(wps_shape)
+                watermark_xml = f'''<w:p xmlns:w="{w_ns}" xmlns:v="{v_ns}" xmlns:o="{o_ns}">
+                    <w:r>
+                        <w:pict>
+                            <v:shape id="Watermark{section_idx}" type="#_x0000_t136"
+                                style="position:absolute;top:50%;left:50%;transform:translate(-50%, -50%);width:468pt;height:230pt;z-index:-251654144;mso-position-horizontal:center;mso-position-vertical:center;mso-wrap-edited:f"
+                                rotation="315" fillcolor="#d3d3d3" stroked="f">
+                                <v:textbox style="mso-fit-shape-to-text:t">
+                                    <w:txbxContent>
+                                        <w:p>
+                                            <w:r>
+                                                <w:rPr>
+                                                    <w:color w:val="D3D3D3"/>
+                                                    <w:sz w:val="120"/>
+                                                </w:rPr>
+                                                <w:t>DRAFT</w:t>
+                                            </w:r>
+                                        </w:p>
+                                    </w:txbxContent>
+                                </v:textbox>
+                            </v:shape>
+                        </w:pict>
+                    </w:r>
+                </w:p>'''
                 
-                # Create the shape properties
-                wps_shape_props = OxmlElement('wps:cNvSpPr')
-                wps_shape_props.set('txBox', '1')
-                wps_shape.append(wps_shape_props)
+                watermark_element = parse_xml(watermark_xml)
+                logger.info(f"  Watermark XML parsed successfully, type: {type(watermark_element)}")
                 
-                # Create the shape properties
-                spPr = OxmlElement('wps:spPr')
-                wps_shape.append(spPr)
+                # Replace the empty paragraph with our watermark paragraph
+                header._element.replace(header_para._element, watermark_element)
+                logger.info(f"  ✅ Watermark paragraph inserted into header for section {section_idx}")
                 
-                # Create a transform element for rotation
-                xfrm = OxmlElement('a:xfrm')
-                xfrm.set('rot', '2700000')  # 270 degrees (in 60,000ths of a degree)
-                spPr.append(xfrm)
+                watermarks_added += 1
+                logger.info(f"✅ Successfully added watermark to section {section_idx+1}")
                 
-                # Create the text body
-                txbx = OxmlElement('wps:txbx')
-                wps_shape.append(txbx)
-                
-                # Add the text box content
-                txbxContent = OxmlElement('w:txbxContent')
-                txbx.append(txbxContent)
-                
-                # Add a paragraph with the watermark text
-                p = OxmlElement('w:p')
-                txbxContent.append(p)
-                
-                # Add paragraph properties
-                pPr = OxmlElement('w:pPr')
-                p.append(pPr)
-                
-                # Center align the text
-                jc = OxmlElement('w:jc')
-                jc.set(qn('w:val'), 'center')
-                pPr.append(jc)
-                
-                # Add a run with the watermark text
-                r = OxmlElement('w:r')
-                p.append(r)
-                
-                # Add run properties
-                rPr = OxmlElement('w:rPr')
-                r.append(rPr)
-                
-                # Set font size (72 point)
-                sz = OxmlElement('w:sz')
-                sz.set(qn('w:val'), '144')  # 144 half-points = 72 points
-                rPr.append(sz)
-                
-                # Set font color to light gray
-                color = OxmlElement('w:color')
-                color.set(qn('w:val'), 'C0C0C0')  # Light gray
-                rPr.append(color)
-                
-                # Make it bold
-                b = OxmlElement('w:b')
-                rPr.append(b)
-                
-                # Make it italic
-                i = OxmlElement('w:i')
-                rPr.append(i)
-                
-                # Add the text
-                t = OxmlElement('w:t')
-                r.append(t)
-                t.text = 'DRAFT'
-                
-                # Set body properties for the shape
-                bodyPr = OxmlElement('wps:bodyPr')
-                bodyPr.set('rot', '0')
-                bodyPr.set('vert', 'horz')
-                wps_shape.append(bodyPr)
-                
-                # Set the shape to be semi-transparent
-                wps_style = OxmlElement('wps:style')
-                wps_shape.append(wps_style)
-                
-                # Add fill properties to make it semi-transparent
-                fill_props = OxmlElement('a:fillStyleLst')
-                wps_style.append(fill_props)
-                
-                logger.info(f"Added true background watermark to section {section_idx+1}")
-            except Exception as drawing_error:
-                logger.error(f"Error creating drawing watermark: {str(drawing_error)}")
-                
-                # Fallback to simpler method if the drawing approach fails
-                try:
-                    # Create a simple watermark paragraph
-                    p = header_part.add_paragraph()
-                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    
-                    # Add the watermark text
-                    run = p.add_run("DRAFT")
-                    run.font.size = Pt(120)  # Very large font
-                    run.font.bold = True
-                    run.font.color.rgb = RGBColor(192, 192, 192)  # Light gray
-                    
-                    # Try to position it behind text using Word's XML
-                    p_element = p._p
-                    pPr = p_element.get_or_add_pPr()
-                    
-                    # Set the paragraph to be positioned
-                    framePr = OxmlElement('w:framePr')
-                    framePr.set(qn('w:wrap'), 'through')  # Text wraps through
-                    framePr.set(qn('w:vAnchor'), 'page')  # Anchor to page
-                    framePr.set(qn('w:hAnchor'), 'page')  # Anchor to page
-                    framePr.set(qn('w:yAlign'), 'center')  # Center vertically
-                    framePr.set(qn('w:xAlign'), 'center')  # Center horizontally
-                    pPr.append(framePr)
-                    
-                    # Set z-order to be behind text
-                    behindText = OxmlElement('w:rPr')
-                    vanish = OxmlElement('w:vanish')
-                    behindText.append(vanish)
-                    p_element.append(behindText)
-                    
-                    logger.info(f"Added fallback watermark to section {section_idx+1}")
-                except Exception as fallback_error:
-                    logger.error(f"Fallback watermark also failed: {str(fallback_error)}")
+            except Exception as section_error:
+                logger.error(f"❌ Failed to add watermark to section {section_idx+1}: {str(section_error)}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
         
-        logger.info("Watermark addition completed successfully")
+        logger.info(f"✅ Successfully added {watermarks_added} watermarks total")
+        
+        if watermarks_added == 0:
+            logger.error("⚠️ WARNING: No watermarks were added!")
+            return False
+        
+        return True
         
     except Exception as e:
-        logger.error(f"Error adding watermark: {str(e)}")
-        # Last resort fallback
-        try:
-            # Just add DRAFT to each header
-            for section in doc.sections:
-                if section.header:
-                    p = section.header.add_paragraph()
-                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    run = p.add_run("DRAFT")
-                    run.font.bold = True
-                    run.font.size = Pt(72)
-                    run.font.color.rgb = RGBColor(192, 192, 192)  # Light gray
-            logger.info("Added last resort watermark")
-        except Exception as e2:
-            logger.error(f"All watermark attempts failed: {str(e2)}")
-
+        logger.error(f"Critical error adding watermark: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return False
 
 
 def _remove_existing_watermarks(doc: Document):
-    """Remove any existing watermarks from the document"""
+    """Remove any existing watermarks from the document - NUCLEAR approach"""
     try:
-        # First, remove VML background watermarks (center of page watermarks)
-        for section in doc.sections:
+        logger.info("🚫🚫🚫 Starting AGGRESSIVE watermark removal 🚫🚫🚫")
+        
+        # Strategy 1: Remove from section properties (VML background watermarks)
+        for section_idx, section in enumerate(doc.sections):
             try:
                 sectPr = section._sectPr
+                elements_removed = 0
                 
-                # Find and remove any v:background elements (VML watermarks)
+                # Remove all v:background elements
                 for child in list(sectPr):
-                    if child.tag.endswith('background'):
+                    if 'background' in str(child.tag).lower():
                         sectPr.remove(child)
-                        logger.info("Removed VML background watermark")
+                        elements_removed += 1
+                        logger.info(f"Removed background element from section {section_idx+1}")
+                
+                logger.info(f"Section {section_idx+1}: Removed {elements_removed} background elements")
             except Exception as vml_error:
-                logger.warning(f"Error removing VML watermarks: {str(vml_error)}")
+                logger.warning(f"Error removing VML watermarks from section {section_idx+1}: {str(vml_error)}")
         
-        # Remove watermarks from headers and footers
-        for section in doc.sections:
-            # Remove watermarks from header
+        # Strategy 2: Remove ALL paragraphs from headers/footers that contain DRAFT (aggressive)
+        for section_idx, section in enumerate(doc.sections):
+            logger.info(f"Processing section {section_idx+1} for header/footer watermarks")
+            
+            # Process ALL header types
+            headers_to_check = []
+            
+            # Main header
             if section.header:
-                _remove_watermarks_from_header_footer(section.header)
+                headers_to_check.append(('main header', section.header))
             
-            # Remove watermarks from footer
+            # First page header
+            try:
+                if section.first_page_header:
+                    headers_to_check.append(('first page header', section.first_page_header))
+            except:
+                pass
+            
+            # Even page header
+            try:
+                if section.even_page_header:
+                    headers_to_check.append(('even page header', section.even_page_header))
+            except:
+                pass
+            
+            # Process each header
+            for header_name, header in headers_to_check:
+                logger.info(f"Checking {header_name} in section {section_idx+1}")
+                paragraphs_to_remove = []
+                
+                # Check every paragraph
+                for para_idx, paragraph in enumerate(list(header.paragraphs)):
+                    para_text = paragraph.text.strip().upper()
+                    
+                    # Remove if it contains DRAFT anywhere
+                    if 'DRAFT' in para_text:
+                        paragraphs_to_remove.append(paragraph)
+                        logger.info(f"Marked paragraph {para_idx} for removal from {header_name}: '{paragraph.text[:50]}'")
+                    
+                    # Also check for VML/drawing elements
+                    try:
+                        p_element = paragraph._p
+                        
+                        # Check for drawings
+                        drawings = p_element.xpath('.//w:drawing')
+                        if drawings:
+                            # Check if any text in the drawing contains DRAFT
+                            for drawing in drawings:
+                                text_elements = drawing.xpath('.//w:t')
+                                for text_elem in text_elements:
+                                    if text_elem.text and 'DRAFT' in text_elem.text.upper():
+                                        paragraphs_to_remove.append(paragraph)
+                                        logger.info(f"Found drawing with DRAFT in {header_name}")
+                                        break
+                        
+                        # Check for VML shapes
+                        picts = p_element.xpath('.//w:pict')
+                        if picts:
+                            paragraphs_to_remove.append(paragraph)
+                            logger.info(f"Found VML shape in {header_name} - removing as precaution")
+                        
+                        # Check for positioned paragraphs (framePr)
+                        pPr = p_element.xpath('.//w:pPr')
+                        if pPr:
+                            for pr in pPr:
+                                frame_props = pr.xpath('.//w:framePr')
+                                if frame_props:
+                                    paragraphs_to_remove.append(paragraph)
+                                    logger.info(f"Found positioned paragraph in {header_name} - removing")
+                                    break
+                    
+                    except Exception as check_error:
+                        logger.warning(f"Error checking paragraph elements: {str(check_error)}")
+                
+                # Remove marked paragraphs
+                removed_count = 0
+                for paragraph in paragraphs_to_remove:
+                    try:
+                        paragraph._element.getparent().remove(paragraph._element)
+                        removed_count += 1
+                    except Exception as remove_error:
+                        logger.warning(f"Could not remove paragraph: {str(remove_error)}")
+                
+                logger.info(f"✅ Removed {removed_count} paragraphs from {header_name}")
+            
+            # Process footers (same approach)
+            footers_to_check = []
+            
             if section.footer:
-                _remove_watermarks_from_header_footer(section.footer)
-        
-        # Remove any watermarks from the document body
-        paragraphs_to_remove = []
-        for i, paragraph in enumerate(doc.paragraphs):
-            # Check if this is a standalone DRAFT watermark paragraph
-            if paragraph.text.strip().upper() == 'DRAFT':
-                # Check if it has watermark characteristics (centered, large font)
-                if paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER:
-                    paragraphs_to_remove.append(paragraph)
-                    logger.info(f"Found body watermark paragraph at index {i}")
+                footers_to_check.append(('main footer', section.footer))
             
-            # Also check for runs with DRAFT text that might be watermarks
+            try:
+                if section.first_page_footer:
+                    footers_to_check.append(('first page footer', section.first_page_footer))
+            except:
+                pass
+            
+            try:
+                if section.even_page_footer:
+                    footers_to_check.append(('even page footer', section.even_page_footer))
+            except:
+                pass
+            
+            for footer_name, footer in footers_to_check:
+                logger.info(f"Checking {footer_name} in section {section_idx+1}")
+                paragraphs_to_remove = []
+                
+                for para_idx, paragraph in enumerate(list(footer.paragraphs)):
+                    para_text = paragraph.text.strip().upper()
+                    
+                    if 'DRAFT' in para_text:
+                        paragraphs_to_remove.append(paragraph)
+                        logger.info(f"Marked paragraph {para_idx} for removal from {footer_name}")
+                
+                removed_count = 0
+                for paragraph in paragraphs_to_remove:
+                    try:
+                        paragraph._element.getparent().remove(paragraph._element)
+                        removed_count += 1
+                    except Exception as remove_error:
+                        logger.warning(f"Could not remove paragraph: {str(remove_error)}")
+                
+                logger.info(f"✅ Removed {removed_count} paragraphs from {footer_name}")
+        
+        # Strategy 3: Remove DRAFT text from body paragraphs
+        logger.info("Checking body paragraphs for DRAFT watermarks")
+        paragraphs_to_remove = []
+        
+        for i, paragraph in enumerate(doc.paragraphs):
+            paragraph_text = paragraph.text.strip().upper()
+            
+            # Remove standalone DRAFT paragraphs
+            if paragraph_text == 'DRAFT' or paragraph_text == '[DRAFT]':
+                paragraphs_to_remove.append(paragraph)
+                logger.info(f"Found standalone DRAFT paragraph at index {i}")
+            
+            # Clear DRAFT from runs with watermark characteristics
             for run in paragraph.runs:
                 if run.text and 'DRAFT' in run.text.upper():
-                    # Check if this looks like a watermark (gray, bold, large)
+                    # Check for watermark characteristics
                     is_watermark = False
                     
-                    # Check for gray color
-                    if run.font.color and run.font.color.rgb:
-                        rgb = run.font.color.rgb
-                        if rgb.red == rgb.green == rgb.blue and rgb.red > 128:
-                            is_watermark = True
+                    # Gray color check
+                    try:
+                        if run.font.color and run.font.color.rgb:
+                            rgb = run.font.color.rgb
+                            if rgb.red == rgb.green == rgb.blue and rgb.red > 100:
+                                is_watermark = True
+                    except:
+                        pass
                     
-                    # Check for large size
-                    if run.font.size and run.font.size > Pt(30):
-                        is_watermark = True
+                    # Large font check
+                    try:
+                        if run.font.size and run.font.size >= Pt(30):
+                            is_watermark = True
+                    except:
+                        pass
+                    
+                    # Bold check
+                    try:
+                        if run.font.bold:
+                            is_watermark = True
+                    except:
+                        pass
                     
                     if is_watermark:
-                        run.text = run.text.replace('DRAFT', '')
-                        logger.info(f"Cleared DRAFT watermark text from paragraph {i}")
+                        run.text = run.text.replace('DRAFT', '').replace('Draft', '').replace('draft', '')
+                        logger.info(f"Cleared DRAFT from watermark run in paragraph {i}")
         
-        # Remove watermark paragraphs from body
+        # Remove marked paragraphs
+        body_removed = 0
         for paragraph in paragraphs_to_remove:
             try:
                 paragraph._element.getparent().remove(paragraph._element)
-                logger.info("Removed body watermark paragraph")
+                body_removed += 1
             except Exception as e:
-                logger.warning(f"Could not remove body watermark paragraph: {str(e)}")
+                logger.warning(f"Could not remove body paragraph: {str(e)}")
         
-        logger.info("Successfully removed existing watermarks from template")
+        logger.info(f"✅ Removed {body_removed} DRAFT paragraphs from document body")
+        
+        # Strategy 4: Remove shapes and drawings with DRAFT text
+        logger.info("Checking for watermark shapes and drawings")
+        try:
+            document_part = doc.part
+            doc_element = document_part.element
+            
+            shapes_removed = 0
+            
+            # Find all drawings
+            drawing_elements = doc_element.xpath('.//w:drawing')
+            logger.info(f"Found {len(drawing_elements)} drawing elements to check")
+            
+            for drawing in list(drawing_elements):
+                should_remove = False
+                
+                # Check for DRAFT in text elements
+                text_elements = drawing.xpath('.//w:t')
+                for text_elem in text_elements:
+                    if text_elem.text and 'DRAFT' in text_elem.text.upper():
+                        should_remove = True
+                        logger.info(f"Found drawing with DRAFT text: '{text_elem.text}'")
+                        break
+                
+                # Also check DrawingML text
+                if not should_remove:
+                    a_text_elements = drawing.xpath('.//a:t', namespaces={'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'})
+                    for text_elem in a_text_elements:
+                        if text_elem.text and 'DRAFT' in text_elem.text.upper():
+                            should_remove = True
+                            logger.info(f"Found DrawingML with DRAFT text: '{text_elem.text}'")
+                            break
+                
+                if should_remove:
+                    try:
+                        parent = drawing.getparent()
+                        if parent is not None:
+                            parent.remove(drawing)
+                            shapes_removed += 1
+                    except Exception as e:
+                        logger.warning(f"Could not remove drawing: {str(e)}")
+            
+            # Find all VML shapes (w:pict)
+            pict_elements = doc_element.xpath('.//w:pict')
+            logger.info(f"Found {len(pict_elements)} VML pict elements to check")
+            
+            for pict in list(pict_elements):
+                should_remove = False
+                
+                # Check for textpath with DRAFT
+                textpath_elements = pict.xpath('.//v:textpath', namespaces={'v': 'urn:schemas-microsoft-com:vml'})
+                for textpath in textpath_elements:
+                    text_content = textpath.get('string', '')
+                    if 'DRAFT' in text_content.upper():
+                        should_remove = True
+                        logger.info(f"Found VML textpath with DRAFT: '{text_content}'")
+                        break
+                
+                # Check for shape IDs containing watermark
+                shape_elements = pict.xpath('.//v:shape', namespaces={'v': 'urn:schemas-microsoft-com:vml'})
+                for shape in shape_elements:
+                    shape_id = shape.get('id', '')
+                    if 'watermark' in shape_id.lower():
+                        should_remove = True
+                        logger.info(f"Found VML shape with watermark ID: '{shape_id}'")
+                        break
+                
+                if should_remove:
+                    try:
+                        parent = pict.getparent()
+                        if parent is not None:
+                            parent.remove(pict)
+                            shapes_removed += 1
+                    except Exception as e:
+                        logger.warning(f"Could not remove VML pict: {str(e)}")
+            
+            logger.info(f"✅ Removed {shapes_removed} watermark shapes/drawings")
+        
+        except Exception as shape_error:
+            logger.error(f"Error removing shapes: {str(shape_error)}")
+        
+        logger.info("✅✅✅ AGGRESSIVE watermark removal completed ✅✅✅")
         
     except Exception as e:
-        logger.warning(f"Could not remove existing watermarks: {str(e)}")
+        logger.error(f"Critical error in watermark removal: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 def _remove_watermarks_from_header_footer(header_footer):
     """Remove watermarks from header or footer"""
     try:
-        # Look for VML watermarks (our new implementation)
-        try:
-            # Find paragraphs with VML elements
-            for paragraph in list(header_footer.paragraphs):
-                # Check for w:pict elements
+        logger.info("Starting watermark removal from header/footer")
+        
+        # First, remove entire paragraphs that are watermarks
+        paragraphs_to_remove = []
+        
+        # Look for VML watermarks and shapes with DRAFT text
+        for paragraph in list(header_footer.paragraphs):
+            should_remove = False
+            paragraph_text = paragraph.text.strip().upper()
+            
+            # Check if this paragraph contains DRAFT watermark text
+            if 'DRAFT' in paragraph_text:
+                logger.info(f"Found paragraph with DRAFT text: '{paragraph.text}'")
+                
+                # Check if it's likely a watermark based on properties
+                try:
+                    p_element = paragraph._p
+                    pPr = p_element.get_or_add_pPr()
+                    
+                    # Check for framePr (positioned paragraphs used for watermarks)
+                    frame_props = pPr.xpath('.//w:framePr')
+                    if frame_props:
+                        should_remove = True
+                        logger.info("Found framePr - this is a positioned watermark paragraph")
+                    
+                    # Check for centered alignment with large font (watermark characteristics)
+                    if paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER:
+                        for run in paragraph.runs:
+                            if run.font.size and run.font.size >= Pt(60):  # Large font
+                                should_remove = True
+                                logger.info(f"Found centered DRAFT with large font: {run.font.size}")
+                                break
+                
+                except Exception as check_error:
+                    logger.warning(f"Error checking paragraph properties: {str(check_error)}")
+                
+                # Check for w:pict elements (VML shapes)
                 try:
                     p_element = paragraph._p
                     pict_elements = p_element.xpath('.//w:pict')
                     
                     if pict_elements:
+                        logger.info("Found w:pict elements")
                         for pict in pict_elements:
                             # Check for v:shape elements that might be watermarks
-                            shape_elements = pict.xpath('./v:shape')
+                            shape_elements = pict.xpath('.//v:shape')
                             for shape in shape_elements:
                                 # Check if this is a watermark shape
-                                if shape.get('id', '').startswith('Watermark'):
-                                    # Remove the entire paragraph
-                                    paragraph._element.getparent().remove(paragraph._element)
-                                    logger.info("Removed VML watermark paragraph")
+                                shape_id = shape.get('id', '')
+                                if 'Watermark' in shape_id or 'watermark' in shape_id:
+                                    should_remove = True
+                                    logger.info(f"Found VML watermark shape: {shape_id}")
                                     break
-                except Exception as e:
-                    logger.warning(f"Error checking for VML elements: {str(e)}")
-        except Exception as vml_error:
-            logger.warning(f"Error checking for VML watermarks: {str(vml_error)}")
+                                
+                                # Check for textpath with DRAFT text
+                                textpath_elements = shape.xpath('.//v:textpath')
+                                for textpath in textpath_elements:
+                                    text_content = textpath.get('string', '')
+                                    if 'DRAFT' in text_content.upper():
+                                        should_remove = True
+                                        logger.info(f"Found VML watermark with DRAFT text: {text_content}")
+                                        break
+                            
+                            if should_remove:
+                                break
+                
+                except Exception as vml_error:
+                    logger.warning(f"Error checking for VML elements: {str(vml_error)}")
+                
+                # Check for w:drawing elements
+                try:
+                    p_element = paragraph._p
+                    drawing_elements = p_element.xpath('.//w:drawing')
+                    
+                    if drawing_elements:
+                        logger.info("Found w:drawing elements")
+                        for drawing in drawing_elements:
+                            # Check for text elements with DRAFT
+                            text_elements = drawing.xpath('.//w:t')
+                            for text_elem in text_elements:
+                                if text_elem.text and 'DRAFT' in text_elem.text.upper():
+                                    should_remove = True
+                                    logger.info(f"Found drawing watermark with DRAFT text: {text_elem.text}")
+                                    break
+                            
+                            # Also check DrawingML text
+                            a_text_elements = drawing.xpath('.//a:t', namespaces={'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'})
+                            for text_elem in a_text_elements:
+                                if text_elem.text and 'DRAFT' in text_elem.text.upper():
+                                    should_remove = True
+                                    logger.info(f"Found DrawingML watermark with DRAFT text: {text_elem.text}")
+                                    break
+                            
+                            if should_remove:
+                                break
+                
+                except Exception as drawing_error:
+                    logger.warning(f"Error checking for drawing elements: {str(drawing_error)}")
+            
+            # If we determined this is a watermark paragraph, mark it for removal
+            if should_remove:
+                paragraphs_to_remove.append(paragraph)
         
-        # Remove any "DRAFT" text that might be watermarks
-        paragraphs_to_remove = []
+        # Remove identified watermark paragraphs
+        for paragraph in paragraphs_to_remove:
+            try:
+                paragraph._element.getparent().remove(paragraph._element)
+                logger.info("✅ Removed watermark paragraph from header/footer")
+            except Exception as e:
+                logger.warning(f"Could not remove watermark paragraph: {str(e)}")
         
-        for paragraph in header_footer.paragraphs:
+        logger.info(f"Removed {len(paragraphs_to_remove)} watermark paragraphs in first pass")
+        
+        # Second pass: Remove any remaining "DRAFT" text-only watermarks
+        additional_removals = []
+        
+        for paragraph in list(header_footer.paragraphs):
             paragraph_text = paragraph.text.strip()
             
-            # Check if this paragraph contains only watermark text
-            if paragraph_text.upper() == 'DRAFT':
-                paragraphs_to_remove.append(paragraph)
-                logger.info("Found DRAFT watermark paragraph to remove")
+            # Check if this paragraph contains only DRAFT text (case insensitive)
+            if paragraph_text.upper() == 'DRAFT' or paragraph_text.upper() == '[DRAFT]':
+                additional_removals.append(paragraph)
+                logger.info(f"Found standalone DRAFT text paragraph: '{paragraph_text}'")
+            elif 'DRAFT' in paragraph_text.upper() and len(paragraph_text) < 20:
+                # Short paragraph with DRAFT is likely a watermark
+                additional_removals.append(paragraph)
+                logger.info(f"Found short DRAFT paragraph (likely watermark): '{paragraph_text}'")
+            elif 'DRAFT' in paragraph_text.upper() and len(paragraph_text) < 20:
+                # Short paragraph with DRAFT is likely a watermark
+                additional_removals.append(paragraph)
+                logger.info(f"Found short DRAFT paragraph (likely watermark): '{paragraph_text}'")
             else:
                 # Check individual runs for watermark characteristics
                 runs_to_clear = []
                 for run in paragraph.runs:
                     if run.text and 'DRAFT' in run.text.upper():
-                        # Check if this looks like a watermark (gray, bold, or large)
+                        # Check if this looks like a watermark (gray, bold, large, or italic)
                         is_watermark = False
                         
-                        # Check for gray color
+                        # Check for gray color (watermarks are typically gray)
                         if run.font.color and run.font.color.rgb:
-                            # Check for any gray shade
                             rgb = run.font.color.rgb
-                            if rgb.red == rgb.green == rgb.blue and rgb.red > 128:
+                            # Any gray shade (R=G=B and value > 100)
+                            if rgb.red == rgb.green == rgb.blue and rgb.red > 100:
                                 is_watermark = True
+                                logger.info(f"Found gray DRAFT text: RGB({rgb.red},{rgb.green},{rgb.blue})")
                         
-                        # Check for bold formatting
+                        # Check for bold formatting (watermarks are often bold)
                         if run.font.bold:
                             is_watermark = True
+                            logger.info("Found bold DRAFT text")
                         
                         # Check for italic formatting
                         if run.font.italic:
                             is_watermark = True
+                            logger.info("Found italic DRAFT text")
                         
-                        # Check for large size
-                        if run.font.size and run.font.size > Pt(30):  # Larger threshold
+                        # Check for large size (watermarks are large)
+                        if run.font.size and run.font.size >= Pt(40):
                             is_watermark = True
+                            logger.info(f"Found large DRAFT text: {run.font.size}")
                         
                         if is_watermark:
                             runs_to_clear.append(run)
-                            logger.info("Found DRAFT watermark run to clear")
                 
                 # Clear watermark runs
                 for run in runs_to_clear:
+                    logger.info(f"Clearing DRAFT watermark run: '{run.text}'")
                     run.text = ''
         
-        # Remove watermark paragraphs
-        for paragraph in paragraphs_to_remove:
+        # Remove additional watermark paragraphs
+        for paragraph in additional_removals:
             try:
                 paragraph._element.getparent().remove(paragraph._element)
-                logger.info("Removed DRAFT watermark paragraph")
+                logger.info("✅ Removed additional DRAFT watermark paragraph")
             except Exception as e:
                 logger.warning(f"Could not remove watermark paragraph: {str(e)}")
         
-        # Also check for paragraphs with positioning that might be watermarks
-        for paragraph in header_footer.paragraphs:
+        logger.info(f"Removed {len(additional_removals)} additional watermark paragraphs in second pass")
+        
+        # Third pass: Check for paragraphs with frame positioning (positioned watermarks)
+        positioned_removals = 0
+        for paragraph in list(header_footer.paragraphs):
             try:
                 p_element = paragraph._p
                 pPr = p_element.get_or_add_pPr()
                 
-                # Check if this paragraph has frame properties (positioned)
-                frame_props = pPr.xpath('./w:framePr')
-                if frame_props and 'DRAFT' in paragraph.text.upper():
-                    paragraph._element.getparent().remove(paragraph._element)
-                    logger.info("Removed positioned DRAFT watermark paragraph")
+                # Check if this paragraph has frame properties (positioned paragraphs used by watermarks)
+                frame_props = pPr.xpath('.//w:framePr')
+                if frame_props:
+                    # If it has framePr and contains DRAFT, it's definitely a watermark
+                    if 'DRAFT' in paragraph.text.upper():
+                        paragraph._element.getparent().remove(paragraph._element)
+                        positioned_removals += 1
+                        logger.info(f"✅ Removed positioned DRAFT watermark: '{paragraph.text}'")
+                    else:
+                        # Even if no DRAFT text visible, positioned paragraphs in headers are often watermarks
+                        logger.info(f"Found positioned paragraph (potential watermark): '{paragraph.text}'")
             except Exception as e:
                 logger.warning(f"Error checking for positioned watermark: {str(e)}")
         
+        logger.info(f"Removed {positioned_removals} positioned watermark paragraphs in third pass")
+        logger.info("✅ Watermark removal from header/footer completed")
+        
     except Exception as e:
-        logger.warning(f"Could not remove watermarks from header/footer: {str(e)}")
+        logger.error(f"Could not remove watermarks from header/footer: {str(e)}")
 
 
 def _clear_content_between_item1_and_last_fmv(doc: Document, item1_paragraph) -> None:
