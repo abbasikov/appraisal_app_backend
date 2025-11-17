@@ -276,7 +276,7 @@ async def import_photos(
 async def generate_project_report(
     project_id: int,
     template_id: int,
-    report_type: str = "final",
+    report_type: str = Query("final", description="Report type: 'draft' or 'final'"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -288,6 +288,13 @@ async def generate_project_report(
         )
     
     try:
+        # Log the report type received
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"🚀🚀🚀 GENERATE REPORT ENDPOINT CALLED 🚀🚀🚀")
+        logger.info(f"Project ID: {project_id}, Template ID: {template_id}")
+        logger.info(f"Report Type Received: '{report_type}'")
+        
         # Check if project exists
         project = ProjectService.get_project_by_id(db, project_id)
         if not project:
@@ -320,7 +327,7 @@ async def generate_project_report(
 async def download_project_report(
     project_id: int,
     template_id: int,
-    report_type: str = "final",
+    report_type: str = Query("final", description="Report type: 'draft' or 'final'"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
