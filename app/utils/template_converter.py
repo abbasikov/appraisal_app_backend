@@ -1915,7 +1915,7 @@ def _add_watermark(doc: Document):
                     <w:r>
                         <w:pict>
                             <v:shape id="Watermark{section_idx}" type="#_x0000_t136"
-                                style="position:absolute;top:50%;left:50%;transform:translate(-50%, -50%);width:468pt;height:230pt;z-index:-251654144;mso-position-horizontal:center;mso-position-vertical:center;mso-wrap-edited:f"
+                                style="position:absolute;left:0;top:0;width:468pt;height:200pt;z-index:-251654144;mso-position-horizontal:center;mso-position-vertical:center;mso-position-horizontal-relative:page;mso-position-vertical-relative:page;mso-wrap-edited:f"
                                 rotation="315" fillcolor="#d3d3d3" stroked="f">
                                 <v:textbox style="mso-fit-shape-to-text:t">
                                     <w:txbxContent>
