@@ -57,7 +57,7 @@ class AppraisalService:
     
     @staticmethod
     def get_appraisal_items(db: Session, project_id: int) -> List[dict]:
-        """Get all appraisal items for a project with photo data"""
+        """Get all appraisal items for a project with photo data, excluding items with deleted photos"""
         try:
             items = db.query(AppraisalItem, Photo).outerjoin(
                 Photo, AppraisalItem.photo_id == Photo.id
@@ -66,12 +66,22 @@ class AppraisalService:
             ).order_by(AppraisalItem.sort_order.asc()).all()
             
             result = []
+            line_number = 1  # Sequential numbering
+            
             for item, photo in items:
+                # Skip items that have a photo_id but the photo is deleted
+                if item.photo_id and photo and photo.is_deleted:
+                    continue
+                
+                # Skip items that have a photo_id but the photo doesn't exist
+                if item.photo_id and not photo:
+                    continue
+                
                 item_data = {
                     "id": item.id,
                     "project_id": item.project_id,
                     "photo_id": item.photo_id,
-                    "line_number": item.line_number,
+                    "line_number": line_number,  # Sequential numbering
                     "room_area": item.room_area,
                     "floor_building": getattr(item, 'floor_building', None),
                     "item_type": item.item_type,
@@ -86,9 +96,8 @@ class AppraisalService:
                     "photo_filename": photo.original_filename if photo else None
                 }
                 
-
-                
                 result.append(item_data)
+                line_number += 1  # Increment for next item
             
             return result
             

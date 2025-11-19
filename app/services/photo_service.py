@@ -507,12 +507,21 @@ class PhotoService:
     
     @staticmethod
     def delete_photo(db: Session, photo_id: int, user_id: int) -> bool:
-        """Soft delete photo (set is_deleted = True)"""
+        """Soft delete photo (set is_deleted = True) and delete associated appraisal items"""
         try:
             photo = db.query(Photo).filter(Photo.id == photo_id).first()
             if not photo:
                 return False
             
+            # Import here to avoid circular dependency
+            from app.models.appraisal_item import AppraisalItem
+            
+            # Delete any appraisal items referencing this photo
+            deleted_items = db.query(AppraisalItem).filter(
+                AppraisalItem.photo_id == photo_id
+            ).delete(synchronize_session=False)
+            
+            # Soft delete the photo
             photo.is_deleted = True
             db.commit()
             
@@ -520,7 +529,11 @@ class PhotoService:
             activity = ActivityLog(
                 user_id=user_id,
                 action=f"Deleted photo: {photo.original_filename}",
-                details={"photo_id": photo_id, "project_id": photo.project_id}
+                details={
+                    "photo_id": photo_id, 
+                    "project_id": photo.project_id,
+                    "deleted_appraisal_items": deleted_items
+                }
             )
             db.add(activity)
             db.commit()
