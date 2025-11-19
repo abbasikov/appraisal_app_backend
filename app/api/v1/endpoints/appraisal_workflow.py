@@ -5,7 +5,7 @@ from app.db.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User
 from app.services.appraisal_service import AppraisalService
-from app.schemas.appraisal_item import AppraisalItemUpdate, AppraisalItemReorder, AppraisalSchemaResponse
+from app.schemas.appraisal_item import AppraisalItemCreate, AppraisalItemUpdate, AppraisalItemReorder, AppraisalSchemaResponse
 from app.schemas.appraisal_constants import ROOM_AREA_OPTIONS, FLOOR_BUILDING_OPTIONS, ITEM_TYPE_OPTIONS, TYPE_ATTRIBUTES, REQUIRED_ATTRIBUTES
 from app.schemas.item_description_templates import get_description_template, ITEM_DESCRIPTION_TEMPLATES
 
@@ -59,6 +59,30 @@ async def get_appraisal_items(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch appraisal items: {str(e)}"
+        )
+
+@router.post("/appraisal-items")
+async def create_appraisal_item(
+    item_create: AppraisalItemCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create a new appraisal item"""
+    try:
+        item = AppraisalService.create_appraisal_item(db, item_create)
+        return {
+            "id": item.id,
+            "project_id": item.project_id,
+            "item_type": item.item_type,
+            "line_number": item.line_number,
+            "sort_order": item.sort_order,
+            "attributes": item.attributes,
+            "message": "Item created successfully"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create appraisal item: {str(e)}"
         )
 
 @router.put("/appraisal-items/{item_id}")

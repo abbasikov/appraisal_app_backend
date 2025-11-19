@@ -201,10 +201,17 @@ class TemplateService:
             
             template_path = template.fillable_file_path or template.file_path
             
-            logger.info(f"Generating report with report_type='{report_type}', add_watermark={report_type == 'draft'}")
+            # Detect template category
+            from app.utils.template_detector import detect_template_category
+            template_category = detect_template_category(template.name)
+            
+            logger.info(f"Generating report with category='{template_category.value}', report_type='{report_type}', add_watermark={report_type == 'draft'}")
+            logger.info(f"📊 Using {len(appraisal_items)} items from JSONB attributes (scalable approach)")
+            
             generated_path = generate_report_from_template(
                 template_path, output_path, 
                 template.field_mappings or {}, project_data,
+                template_category=template_category.value,
                 add_watermark=(report_type == "draft")
             )
             

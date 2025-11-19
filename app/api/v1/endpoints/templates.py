@@ -93,6 +93,44 @@ def generate_report(
         "download_url": f"/api/v1/templates/{template_id}/download-report?project_id={request.project_id}&report_type={request.report_type}"
     }
 
+@router.get("/{template_id}/config")
+def get_template_config(
+    template_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get column configuration for a template"""
+    from app.utils.template_detector import detect_template_category, get_template_columns
+    
+    template = TemplateService.get_template_by_id(db, template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    
+    category = detect_template_category(template.name)
+    config = get_template_columns(category)
+    
+    return {
+        "template_id": template_id,
+        "template_name": template.name,
+        "template_category": category.value,
+        "config": config
+    }
+
+@router.get("/categories/all")
+def get_all_categories(
+    current_user: User = Depends(get_current_user)
+):
+    """Get all available template categories and their configurations"""
+    from app.utils.template_detector import TemplateCategory, get_template_columns
+    
+    return {
+        category.value: {
+            "category": category.value,
+            "config": get_template_columns(category)
+        }
+        for category in TemplateCategory
+    }
+
 @router.get("/{template_id}/download-report")
 def download_generated_report(
     template_id: int,

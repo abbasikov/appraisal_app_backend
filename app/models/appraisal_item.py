@@ -26,4 +26,14 @@ class AppraisalItem(Base):
     photo = relationship("Photo")
 
     def __repr__(self):
-        return f"<AppraisalItem(id={self.id}, line_number={self.line_number}, project_id={self.project_id})>"
+        return f"<AppraisalItem(id={self.id}, type='{self.item_type}', line_number={self.line_number}, project_id={self.project_id})>"
+    
+    def validate_attributes(self):
+        """
+        Validate attributes against JSON schema for item_type
+        Returns (is_valid, error_message)
+        """
+        from app.schemas.appraisal_schemas import validate_appraisal_attributes
+        if self.attributes and self.item_type:
+            return validate_appraisal_attributes(self.item_type, self.attributes)
+        return True, ""

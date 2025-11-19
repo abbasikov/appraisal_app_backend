@@ -7,6 +7,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.enum.table import WD_ALIGN_VERTICAL
 from docx.oxml.shared import OxmlElement, qn
 from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
 import logging
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -126,6 +127,7 @@ def _determine_field_type(field_name: str) -> str:
 
 def generate_report_from_template(template_path: str, output_path: str, 
                                 field_mappings: Dict, project_data: Dict, 
+                                template_category: str = "image_based",
                                 add_watermark: bool = False) -> str:
     """Generate report from template using project data"""
     try:
@@ -172,10 +174,37 @@ def generate_report_from_template(template_path: str, output_path: str,
                             for paragraph in cell.paragraphs:
                                 _replace_fields_in_paragraph(paragraph, field_mappings, project_data)
         
-        # Handle appraisal items and images
-        logger.info("🔥🔥🔥 ABOUT TO CALL _handle_appraisal_items 🔥🔥🔥")
-        _handle_appraisal_items(doc, project_data)
-        logger.info("🔥🔥🔥 _handle_appraisal_items COMPLETED 🔥🔥🔥")
+        # Handle category-specific rendering
+        from app.utils.template_detector import TemplateCategory
+        
+        logger.info(f"📋📋📋 TEMPLATE CATEGORY: {template_category} 📋📋📋")
+        
+        if template_category == TemplateCategory.IMAGE_BASED.value or template_category == "image_based":
+            # Use existing image-based logic (BACKWARD COMPATIBLE)
+            logger.info("🖼️ Using IMAGE-BASED rendering (photos + descriptions)")
+            _handle_appraisal_items(doc, project_data)
+        
+        elif template_category == TemplateCategory.COIN.value or template_category == "coin":
+            # Use table-based logic for coins
+            logger.info("🪙 Using COIN TABLE rendering")
+            _handle_coin_table(doc, project_data)
+        
+        elif template_category == TemplateCategory.CONTENT.value or template_category == "content":
+            # Use table-based logic for content/inventory
+            logger.info("📦 Using CONTENT INVENTORY TABLE rendering")
+            _handle_content_table(doc, project_data)
+        
+        elif template_category == TemplateCategory.WINE.value or template_category == "wine":
+            # Use table-based logic for wine
+            logger.info("🍷 Using WINE COLLECTION TABLE rendering")
+            _handle_wine_table(doc, project_data)
+        
+        else:
+            # Default to image-based (safe fallback)
+            logger.warning(f"⚠️ Unknown category '{template_category}', using IMAGE-BASED as fallback")
+            _handle_appraisal_items(doc, project_data)
+        
+        logger.info("🔥🔥🔥 CATEGORY-SPECIFIC RENDERING COMPLETED 🔥🔥🔥")
         
         # Special pass for headers and footers
         logger.info("🔄🔄🔄 PERFORMING SPECIAL HEADER/FOOTER PLACEHOLDER CHECK 🔄🔄🔄")
@@ -1326,6 +1355,9 @@ def _handle_appraisal_items(doc: Document, project_data: Dict):
             # After processing all items, find and remove content between last item and summary
             _cleanup_content_between_images_and_summary(doc, current_index)
             
+            # Add summary table for image-based templates
+            _add_summary_table(doc, appraisal_items, 'image_based', project_data)
+            
             # Add page break after summary (at the end of document)
             try:
                 # Add page break at the end
@@ -1871,6 +1903,679 @@ def _is_valid_image(image_path: str) -> bool:
     except Exception as e:
         logger.error(f"Image validation failed for {image_path}: {str(e)}")
         return False
+
+# ==================== TABLE RENDERING FUNCTIONS ====================
+
+def _handle_coin_table(doc: Document, project_data: Dict):
+    """Handle coin collection table rendering - uses JSONB attributes"""
+    from docx.shared import Pt
+    from docx.enum.text import WD_BREAK
+    
+    logger.info("🪙 Rendering coin collection table from JSONB attributes")
+    
+    # Get coin items from appraisal_items with type='coin'
+    appraisal_items = project_data.get('appraisal_items', [])
+    coin_items = [
+        item.get('attributes', {})
+        for item in appraisal_items
+        if item.get('item_type') in ['coin', 'coins']
+    ]
+    
+    if not coin_items:
+        logger.warning("No coin items found for coin table")
+        return
+    
+    # Find the first table in the document and replace it
+    if len(doc.tables) > 0:
+        logger.info(f"📋 Found {len(doc.tables)} table(s) in document, replacing first one with coin data")
+        old_table = doc.tables[0]
+        
+        # Get the parent element and position
+        tbl_element = old_table._element
+        parent = tbl_element.getparent()
+        tbl_index = list(parent).index(tbl_element)
+        logger.info(f"📍 Old table position: index {tbl_index}")
+        
+        # Create new table (will be added at end of document initially)
+        logger.info("🔨 Creating new coin table...")
+        new_table = doc.add_table(rows=1, cols=5)
+        
+        # Try to apply a style, fall back to Table Grid if not available
+        try:
+            new_table.style = 'Light Grid Accent 1'
+        except KeyError:
+            try:
+                new_table.style = 'Table Grid'
+            except KeyError:
+                pass  # Use default table style
+        
+        # Header row
+        header_cells = new_table.rows[0].cells
+        header_cells[0].text = "Quantity"
+        header_cells[1].text = "Year"
+        header_cells[2].text = "Coin"
+        header_cells[3].text = "Condition"
+        header_cells[4].text = "Appraised Price"
+        
+        # Make headers bold (no color)
+        for cell in header_cells:
+            # Set cell height for header row
+            cell.height = Pt(25)
+            for para in cell.paragraphs:
+                for run in para.runs:
+                    run.font.bold = True
+                    run.font.size = Pt(14)
+        
+        # Data rows
+        logger.info(f"📝 Adding {len(coin_items)} coin items to table")
+        for coin in coin_items:
+            row_cells = new_table.add_row().cells
+            
+            row_cells[0].text = str(coin.get('quantity', ''))
+            row_cells[1].text = str(coin.get('year', ''))
+            row_cells[2].text = str(coin.get('coin_name', ''))
+            row_cells[3].text = str(coin.get('condition', ''))
+            
+            # Format price
+            price = coin.get('appraised_price', 0)
+            try:
+                row_cells[4].text = f"${float(price):,.2f}"
+            except:
+                row_cells[4].text = "$0.00"
+            
+            # Format cells
+            for cell in row_cells:
+                for para in cell.paragraphs:
+                    for run in para.runs:
+                        run.font.size = Pt(14)
+        
+        logger.info("🔄 Moving new table to replace old table...")
+        
+        # Move new table to correct position and remove old table (no page break)
+        new_tbl_element = new_table._element
+        doc._body._element.remove(new_tbl_element)  # Remove from end
+        parent.insert(tbl_index, new_tbl_element)  # Insert at same position
+        logger.info("✅ Inserted new table at correct position")
+        
+        parent.remove(tbl_element)  # Remove old template table
+        logger.info("✅ Removed old template table")
+        
+        # Add page break after data table
+        break_after_data = OxmlElement('w:p')
+        break_run_after_data = OxmlElement('w:r')
+        break_element_after_data = OxmlElement('w:br')
+        break_element_after_data.set(qn('w:type'), 'page')
+        break_run_after_data.append(break_element_after_data)
+        break_after_data.append(break_run_after_data)
+        parent.insert(tbl_index + 1, break_after_data)
+        logger.info("✅ Added page break after coin data table")
+        
+        # Add summary table after data table
+        _add_summary_table(doc, coin_items, 'coin', project_data)
+        
+        logger.info(f"✅ Coin table replaced with {len(coin_items)} items from JSONB attributes")
+    else:
+        logger.warning("⚠️ No table found in document to replace")
+
+def _handle_content_table(doc: Document, project_data: Dict):
+    """Handle content/inventory table rendering - uses JSONB attributes"""
+    from docx.shared import Pt
+    from docx.enum.text import WD_BREAK
+    
+    logger.info("📦 Rendering content inventory table from JSONB attributes")
+    
+    # Get content items from appraisal_items with type='content'
+    appraisal_items = project_data.get('appraisal_items', [])
+    content_items = [
+        item.get('attributes', {})
+        for item in appraisal_items
+        if item.get('item_type') in ['content', 'contents', 'inventory']
+    ]
+    
+    if not content_items:
+        logger.warning("No content items found for content table")
+        return
+    
+    # Find the first table in the document and replace it
+    if len(doc.tables) > 0:
+        logger.info(f"📋 Found {len(doc.tables)} table(s) in document, replacing first one with content data")
+        old_table = doc.tables[0]
+        
+        # Get the parent element and position
+        tbl_element = old_table._element
+        parent = tbl_element.getparent()
+        tbl_index = list(parent).index(tbl_element)
+        logger.info(f"📍 Old table position: index {tbl_index}")
+        
+        # Create new table (will be added at end of document initially)
+        logger.info("🔨 Creating new content table...")
+        new_table = doc.add_table(rows=1, cols=2)
+        
+        # Try to apply a style, fall back to Table Grid if not available
+        try:
+            new_table.style = 'Light Grid Accent 1'
+        except KeyError:
+            try:
+                new_table.style = 'Table Grid'
+            except KeyError:
+                pass  # Use default table style
+        
+        # Header row
+        header_cells = new_table.rows[0].cells
+        header_cells[0].text = "Area"
+        header_cells[1].text = "Fair Market Value (FMV)"
+        
+        # Make headers bold (no color)
+        for cell in header_cells:
+            # Set cell height for header row
+            cell.height = Pt(25)
+            for para in cell.paragraphs:
+                for run in para.runs:
+                    run.font.bold = True
+                    run.font.size = Pt(14)
+        
+        # Data rows
+        logger.info(f"📝 Adding {len(content_items)} content items to table")
+        for content in content_items:
+            row_cells = new_table.add_row().cells
+            
+            row_cells[0].text = str(content.get('area', ''))
+            
+            # Format FMV
+            fmv = content.get('fair_market_value', 0)
+            try:
+                row_cells[1].text = f"${float(fmv):,.2f}"
+            except:
+                row_cells[1].text = "$0.00"
+            
+            # Format cells
+            for cell in row_cells:
+                for para in cell.paragraphs:
+                    for run in para.runs:
+                        run.font.size = Pt(14)
+        
+        logger.info("🔄 Moving new table to replace old table...")
+        
+        # Move new table to correct position and remove old table (no page break)
+        new_tbl_element = new_table._element
+        doc._body._element.remove(new_tbl_element)  # Remove from end
+        parent.insert(tbl_index, new_tbl_element)  # Insert at same position
+        logger.info("✅ Inserted new table at correct position")
+        
+        parent.remove(tbl_element)  # Remove old template table
+        logger.info("✅ Removed old template table")
+        
+        # Add page break after data table
+        break_after_data = OxmlElement('w:p')
+        break_run_after_data = OxmlElement('w:r')
+        break_element_after_data = OxmlElement('w:br')
+        break_element_after_data.set(qn('w:type'), 'page')
+        break_run_after_data.append(break_element_after_data)
+        break_after_data.append(break_run_after_data)
+        parent.insert(tbl_index + 1, break_after_data)
+        logger.info("✅ Added page break after content data table")
+        
+        # Add summary table after data table
+        _add_summary_table(doc, content_items, 'content', project_data)
+        
+        logger.info(f"✅ Content table replaced with {len(content_items)} items from JSONB attributes")
+    else:
+        logger.warning("⚠️ No table found in document to replace")
+
+def _handle_wine_table(doc: Document, project_data: Dict):
+    """Handle wine collection table rendering - uses JSONB attributes"""
+    from docx.shared import Pt
+    from docx.enum.text import WD_BREAK
+    
+    logger.info("🍷 Rendering wine collection table from JSONB attributes")
+    
+    # Get wine items from appraisal_items with type='wine'
+    appraisal_items = project_data.get('appraisal_items', [])
+    wine_items = [
+        item.get('attributes', {})
+        for item in appraisal_items
+        if item.get('item_type') in ['wine', 'wines']
+    ]
+    
+    if not wine_items:
+        logger.warning("No wine items found for wine table")
+        return
+    
+    # Find the first table in the document and replace it
+    if len(doc.tables) > 0:
+        logger.info(f"📋 Found {len(doc.tables)} table(s) in document, replacing first one with wine data")
+        old_table = doc.tables[0]
+        
+        # Get the parent element and position
+        tbl_element = old_table._element
+        parent = tbl_element.getparent()
+        tbl_index = list(parent).index(tbl_element)
+        logger.info(f"📍 Old table position: index {tbl_index}")
+        
+        # Create new table (will be added at end of document initially)
+        logger.info("🔨 Creating new wine table...")
+        new_table = doc.add_table(rows=1, cols=4)
+        
+        # Try to apply a style, fall back to Table Grid if not available
+        try:
+            new_table.style = 'Light Grid Accent 1'
+        except KeyError:
+            try:
+                new_table.style = 'Table Grid'
+            except KeyError:
+                pass  # Use default table style
+        
+        # Header row
+        header_cells = new_table.rows[0].cells
+        header_cells[0].text = "Quantity"
+        header_cells[1].text = "Bottle"
+        header_cells[2].text = "Per Bottle Price"
+        header_cells[3].text = "Total Price"
+        
+        # Make headers bold (no color)
+        for cell in header_cells:
+            # Set cell height for header row
+            cell.height = Pt(25)
+            for para in cell.paragraphs:
+                for run in para.runs:
+                    run.font.bold = True
+                    run.font.size = Pt(14)
+        
+        # Data rows
+        logger.info(f"📝 Adding {len(wine_items)} wine items to table")
+        for wine in wine_items:
+            row_cells = new_table.add_row().cells
+            
+            row_cells[0].text = str(wine.get('quantity', ''))
+            row_cells[1].text = str(wine.get('bottle_description', ''))
+            
+            # Format prices
+            try:
+                per_bottle = float(wine.get('per_bottle_price', 0))
+                row_cells[2].text = f"${per_bottle:,.2f}"
+            except:
+                row_cells[2].text = "$0.00"
+            
+            try:
+                total = float(wine.get('total_price', 0))
+                row_cells[3].text = f"${total:,.2f}"
+            except:
+                row_cells[3].text = "$0.00"
+            
+            # Format cells
+            for cell in row_cells:
+                for para in cell.paragraphs:
+                    for run in para.runs:
+                        run.font.size = Pt(14)
+        
+        logger.info("🔄 Moving new table to replace old table...")
+        
+        # Move new table to correct position and remove old table (no page break)
+        new_tbl_element = new_table._element
+        doc._body._element.remove(new_tbl_element)  # Remove from end
+        parent.insert(tbl_index, new_tbl_element)  # Insert at same position
+        logger.info("✅ Inserted new table at correct position")
+        
+        parent.remove(tbl_element)  # Remove old template table
+        logger.info("✅ Removed old template table")
+        
+        # Add page break after data table
+        break_after_data = OxmlElement('w:p')
+        break_run_after_data = OxmlElement('w:r')
+        break_element_after_data = OxmlElement('w:br')
+        break_element_after_data.set(qn('w:type'), 'page')
+        break_run_after_data.append(break_element_after_data)
+        break_after_data.append(break_run_after_data)
+        parent.insert(tbl_index + 1, break_after_data)
+        logger.info("✅ Added page break after wine data table")
+        
+        # Add summary table after data table
+        _add_summary_table(doc, wine_items, 'wine', project_data)
+        
+        logger.info(f"✅ Wine table replaced with {len(wine_items)} items from JSONB attributes")
+    else:
+        logger.warning("⚠️ No table found in document to replace")
+
+def _add_summary_table(doc: Document, items: list, item_type: str, project_data: Dict):
+    """Find summary section and replace its table with project summary data"""
+    from docx.enum.text import WD_BREAK, WD_ALIGN_PARAGRAPH
+    from datetime import datetime
+    
+    logger.info(f"📊 Searching for summary table to replace for {item_type}")
+    
+    # First, find all tables in the document
+    if len(doc.tables) == 0:
+        logger.warning("⚠️ No tables found in document, skipping summary replacement")
+        return
+    
+    # Search for "summary" text that has a table after it
+    # We need to find the RIGHT summary (not table of contents), so we check if there's a table nearby
+    summary_paragraph = None
+    summary_table_to_replace = None
+    parent = None
+    
+    for idx, paragraph in enumerate(doc.paragraphs):
+        if 'summary' in paragraph.text.lower():
+            # Check if there's a table after this paragraph
+            temp_parent = paragraph._element.getparent()
+            para_element = paragraph._element
+            para_position = list(temp_parent).index(para_element)
+            
+            # Look for table elements after this paragraph (within a reasonable distance)
+            tables_found = []
+            for i in range(para_position + 1, min(para_position + 50, len(list(temp_parent)))):
+                element = list(temp_parent)[i]
+                if element.tag.endswith('}tbl'):  # This is a table element
+                    # Find which table object this corresponds to
+                    for tbl in doc.tables:
+                        if tbl._element == element:
+                            tables_found.append(tbl)
+                            break
+                    if tables_found:
+                        break  # Stop after finding first table
+            
+            # If we found a table after this summary text, this is the right one
+            if tables_found:
+                summary_paragraph = paragraph
+                parent = temp_parent
+                logger.info(f"✅ Found summary section with table at paragraph {idx}: '{paragraph.text.strip()}'")
+                
+                # Determine which table to use
+                if len(tables_found) > 1:
+                    summary_table_to_replace = tables_found[-1]  # Use the LAST table
+                    logger.info(f"📋 Found {len(tables_found)} tables after summary, using last one")
+                else:
+                    summary_table_to_replace = tables_found[0]
+                    logger.info(f"📋 Found table after summary section")
+                break
+    
+    if not summary_paragraph or not summary_table_to_replace:
+        logger.warning("⚠️ No summary section with table found, skipping replacement")
+        return
+    
+    # Get table position
+    tbl_element = summary_table_to_replace._element
+    tbl_index = list(parent).index(tbl_element)
+    
+    # Get summary paragraph position
+    summary_para_element = summary_paragraph._element
+    summary_para_index = list(parent).index(summary_para_element)
+    
+    # Step 1: Remove the existing summary text paragraph and ALL content between it and the table
+    parent.remove(summary_para_element)
+    logger.info("✅ Removed existing summary text")
+    
+    # Aggressively remove ALL elements between the old summary position and the table
+    # This ensures we clean up any page breaks, empty paragraphs, whitespace, or other elements
+    elements_removed = 0
+    max_cleanup = 50  # Increased safety limit to handle more elements
+    cleanup_count = 0
+    
+    while summary_para_index < len(list(parent)) and cleanup_count < max_cleanup:
+        next_element = list(parent)[summary_para_index]
+        
+        # Stop if we've reached the table
+        if next_element == tbl_element:
+            logger.info("✅ Reached the table, stopping cleanup")
+            break
+        
+        # Check if this element should be removed
+        should_remove = False
+        
+        if next_element.tag.endswith('}p'):  # Paragraph
+            # Get all text from the paragraph and its children
+            full_text = ''.join(next_element.itertext()) if hasattr(next_element, 'itertext') else ''
+            
+            # Remove if:
+            # 1. It's completely empty
+            # 2. It only contains whitespace (spaces, tabs, newlines, etc.)
+            # 3. It contains a page break
+            # 4. It has no text content (just formatting)
+            if not full_text or not full_text.strip() or full_text.isspace():
+                should_remove = True
+                logger.info(f"   → Removing empty/whitespace paragraph")
+            else:
+                # Check for page break in children
+                for child in next_element.iter():
+                    if 'br' in str(child.tag).lower() or 'break' in str(child.tag).lower():
+                        should_remove = True
+                        logger.info(f"   → Removing paragraph with page break")
+                        break
+        
+        if should_remove:
+            parent.remove(next_element)
+            elements_removed += 1
+            cleanup_count += 1
+        else:
+            # If we encounter actual content, stop cleaning
+            logger.info(f"   → Found content paragraph, stopping cleanup")
+            break
+    
+    if elements_removed > 0:
+        logger.info(f"✅ Cleaned up {elements_removed} element(s) between old summary and table")
+    
+    # Recalculate table index after removing summary paragraph and cleanup
+    tbl_index = list(parent).index(tbl_element)
+    
+    # Step 1.5: Aggressively clean up ALL empty paragraphs immediately before the table
+    # This ensures there are no extra spaces before the summary heading
+    extra_elements_removed = 0
+    max_extra_cleanup = 50  # Safety limit
+    extra_cleanup_count = 0
+    
+    # Work backwards from just before the table position
+    check_index = tbl_index - 1
+    while check_index >= 0 and extra_cleanup_count < max_extra_cleanup:
+        if check_index < len(list(parent)):
+            element = list(parent)[check_index]
+            
+            should_remove_extra = False
+            if element.tag.endswith('}p'):  # Paragraph
+                full_text = ''.join(element.itertext()) if hasattr(element, 'itertext') else ''
+                
+                # Remove if empty or whitespace only
+                if not full_text or not full_text.strip() or full_text.isspace():
+                    should_remove_extra = True
+                    logger.info(f"   → Extra cleanup: Removing empty/whitespace paragraph before summary heading")
+            
+            if should_remove_extra:
+                parent.remove(element)
+                extra_elements_removed += 1
+                extra_cleanup_count += 1
+                # Recalculate indices after removal
+                tbl_index = list(parent).index(tbl_element)
+                check_index = tbl_index - 1  # Reset to check again from table position
+            else:
+                # Found content or non-paragraph element, stop cleaning
+                logger.info(f"   → Found content before table, stopping extra cleanup")
+                break
+        else:
+            break
+    
+    if extra_elements_removed > 0:
+        logger.info(f"✅ Extra cleanup removed {extra_elements_removed} empty element(s) before summary heading position")
+
+    page_break_before_summary = OxmlElement('w:p')
+    page_break_run = OxmlElement('w:r')
+    page_break_el = OxmlElement('w:br')
+    page_break_el.set(qn('w:type'), 'page')
+    page_break_run.append(page_break_el)
+    page_break_before_summary.append(page_break_run)
+    parent.insert(tbl_index, page_break_before_summary)
+    logger.info("✅ Added page break BEFORE SUMMARY heading")
+
+    # Final recalculation of table index before inserting heading
+    tbl_index = list(parent).index(tbl_element)
+    
+    # Step 2: Add new centered "SUMMARY" heading at the position where summary was
+    summary_heading_para = OxmlElement('w:p')
+    # Add paragraph properties for center alignment
+    pPr = OxmlElement('w:pPr')
+    jc = OxmlElement('w:jc')
+    jc.set(qn('w:val'), 'center')
+    pPr.append(jc)
+    summary_heading_para.append(pPr)
+    # Add the text run
+    summary_run = OxmlElement('w:r')
+    summary_rPr = OxmlElement('w:rPr')
+    # Make it bold
+    bold = OxmlElement('w:b')
+    summary_rPr.append(bold)
+    # Set font size to 14pt
+    sz = OxmlElement('w:sz')
+    sz.set(qn('w:val'), '28')  # 28 half-points = 14pt
+    summary_rPr.append(sz)
+    summary_run.append(summary_rPr)
+    # Add text
+    summary_text = OxmlElement('w:t')
+    summary_text.text = "SUMMARY"
+    summary_run.append(summary_text)
+    summary_heading_para.append(summary_run)
+    parent.insert(tbl_index, summary_heading_para)
+    logger.info("✅ Inserted centered SUMMARY heading (no page break before)")
+    
+    # Recalculate table index again after adding heading
+    tbl_index = list(parent).index(tbl_element)
+    
+    # Calculate totals based on item type
+    total_items = len(items)
+    total_value = 0.0
+    
+    if item_type == 'coin':
+        for item in items:
+            try:
+                quantity = float(item.get('quantity', 0))
+                price = float(item.get('appraised_price', 0))
+                total_value += (quantity * price)
+            except:
+                pass
+    elif item_type == 'wine':
+        for item in items:
+            try:
+                total_value += float(item.get('total_price', 0))
+            except:
+                pass
+    elif item_type == 'content':
+        for item in items:
+            try:
+                total_value += float(item.get('fair_market_value', 0))
+            except:
+                pass
+    elif item_type == 'image_based':
+        # For image-based templates, get value from appraisal_items
+        appraisal_items = project_data.get('appraisal_items', [])
+        for item in appraisal_items:
+            try:
+                total_value += float(item.get('appraised_value', 0))
+            except:
+                pass
+    
+    # Create new summary table - 2 rows only (headers and values) like the image
+    new_summary_table = doc.add_table(rows=2, cols=2)
+    
+    # Try to apply a style, fall back to Table Grid if not available
+    try:
+        new_summary_table.style = 'Table Grid'
+    except KeyError:
+        pass  # Use default table style
+    
+    # Set column widths (equal width for both columns)
+    for row in new_summary_table.rows:
+        row.cells[0].width = 3250000  # ~3.25 inches
+        row.cells[1].width = 3250000  # ~3.25 inches
+    
+    # Row 1 (Headers): Total number of items | Total appraised value
+    header_cells = new_summary_table.rows[0].cells
+    header_cells[0].text = "Total number of items"
+    header_cells[1].text = "Total appraised value"
+    
+    # Make header row bold and taller with 14pt font
+    for cell in header_cells:
+        cell.height = Pt(25)
+        for para in cell.paragraphs:
+            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for run in para.runs:
+                run.font.bold = True
+                run.font.size = Pt(14)
+    
+    # Row 2 (Values): Item count | Total value
+    value_cells = new_summary_table.rows[1].cells
+    value_cells[0].text = str(total_items)
+    value_cells[1].text = str(int(total_value))  # No dollar sign, no decimals, just number
+    
+    # Format value row with 14pt font, centered
+    for cell in value_cells:
+        for para in cell.paragraphs:
+            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for run in para.runs:
+                run.font.size = Pt(14)
+    
+    # Center align the entire table
+    new_summary_table.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Step 3: Move new table to correct position (after SUMMARY heading) and remove old table
+    new_tbl_element = new_summary_table._element
+    doc._body._element.remove(new_tbl_element)  # Remove from end
+    parent.insert(tbl_index + 1, new_tbl_element)  # Insert after heading (+1)
+    logger.info("✅ Inserted new summary table")
+    
+    parent.remove(tbl_element)  # Remove old template table
+    logger.info("✅ Removed old template table")
+    
+    # Step 4: Add page break after summary table
+    summary_tbl_index = list(parent).index(new_tbl_element)
+    break_after_summary = OxmlElement('w:p')
+    break_run_after_summary = OxmlElement('w:r')
+    break_element_after_summary = OxmlElement('w:br')
+    break_element_after_summary.set(qn('w:type'), 'page')
+    break_run_after_summary.append(break_element_after_summary)
+    break_after_summary.append(break_run_after_summary)
+    parent.insert(summary_tbl_index + 1, break_after_summary)
+    logger.info("✅ Added page break after summary table")
+    
+    # Step 5: Aggressively clean up ALL empty lines/spaces after the page break until we find text content
+    cleanup_index = summary_tbl_index + 2  # Start after the page break we just added
+    elements_cleaned = 0
+    max_cleanup_after = 100  # Increased safety limit to handle more elements
+    cleanup_count_after = 0
+    
+    while cleanup_index < len(list(parent)) and cleanup_count_after < max_cleanup_after:
+        # Check if we're at the end of the document
+        if cleanup_index >= len(list(parent)):
+            logger.info("   → Reached end of document, stopping cleanup")
+            break
+            
+        element_to_check = list(parent)[cleanup_index]
+        
+        # Check if this element should be removed
+        should_remove_after = False
+        if element_to_check.tag.endswith('}p'):  # Paragraph
+            full_text = ''.join(element_to_check.itertext()) if hasattr(element_to_check, 'itertext') else ''
+            
+            # Remove if:
+            # 1. It's completely empty
+            # 2. It only contains whitespace (spaces, tabs, newlines, etc.)
+            # 3. It has no text content (just formatting)
+            if not full_text or not full_text.strip() or full_text.isspace():
+                should_remove_after = True
+                logger.info(f"   → Cleaning up empty/whitespace paragraph after summary table")
+        
+        if should_remove_after:
+            parent.remove(element_to_check)
+            elements_cleaned += 1
+            cleanup_count_after += 1
+            # Don't increment cleanup_index since we removed an element
+        else:
+            # Found actual content, stop cleaning
+            logger.info(f"   → Found content after summary table, stopping cleanup")
+            break
+    
+    if elements_cleaned > 0:
+        logger.info(f"✅ Cleaned up {elements_cleaned} empty element(s) after summary table")
+    
+    logger.info(f"✅ Summary section complete: {total_items} items, ${total_value:,.2f} total value")
+
+# ==================== WATERMARK FUNCTIONS ====================
 
 def _add_watermark(doc: Document):
     """Add DRAFT watermark as a true background watermark using VML shape with textbox"""
