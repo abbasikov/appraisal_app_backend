@@ -17,20 +17,21 @@ class AppraisalItemBase(BaseModel):
     
     @validator('room_area')
     def validate_room_area(cls, v):
-        if v and v not in ROOM_AREA_OPTIONS:
-            raise ValueError(f'Invalid room_area. Must be one of: {ROOM_AREA_OPTIONS}')
+        # Allow any custom value, suggestions provided via schema endpoint
+        if v:
+            return v.upper()  # Normalize to uppercase
         return v
     
     @validator('floor_building')
     def validate_floor_building(cls, v):
-        if v and v not in FLOOR_BUILDING_OPTIONS:
-            raise ValueError(f'Invalid floor_building. Must be one of: {FLOOR_BUILDING_OPTIONS}')
+        # Allow any custom value, suggestions provided via schema endpoint
+        if v:
+            return v.upper()  # Normalize to uppercase
         return v
     
     @validator('item_type')
     def validate_item_type(cls, v):
-        if v and v not in ITEM_TYPE_OPTIONS:
-            raise ValueError(f'Invalid item_type. Must be one of: {ITEM_TYPE_OPTIONS}')
+        # Allow any custom value, suggestions provided via schema endpoint
         return v
 
 class AppraisalItemCreate(AppraisalItemBase):
@@ -58,20 +59,21 @@ class AppraisalItemUpdate(BaseModel):
     
     @validator('room_area')
     def validate_room_area(cls, v):
-        if v and v not in ROOM_AREA_OPTIONS:
-            raise ValueError(f'Invalid room_area. Must be one of: {ROOM_AREA_OPTIONS}')
+        # Allow any custom value, suggestions provided via schema endpoint
+        if v:
+            return v.upper()  # Normalize to uppercase
         return v
     
     @validator('floor_building')
     def validate_floor_building(cls, v):
-        if v and v not in FLOOR_BUILDING_OPTIONS:
-            raise ValueError(f'Invalid floor_building. Must be one of: {FLOOR_BUILDING_OPTIONS}')
+        # Allow any custom value, suggestions provided via schema endpoint
+        if v:
+            return v.upper()  # Normalize to uppercase
         return v
     
     @validator('item_type')
     def validate_item_type(cls, v):
-        if v and v not in ITEM_TYPE_OPTIONS:
-            raise ValueError(f'Invalid item_type. Must be one of: {ITEM_TYPE_OPTIONS}')
+        # Allow any custom value, suggestions provided via schema endpoint
         return v
 
 class AppraisalItemResponse(AppraisalItemBase):
