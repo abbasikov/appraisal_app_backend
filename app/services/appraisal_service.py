@@ -105,12 +105,44 @@ class AppraisalService:
             raise e
     
     @staticmethod
+    def create_appraisal_item(db: Session, item_create: AppraisalItemCreate) -> AppraisalItem:
+        """Create a new appraisal item"""
+        try:
+            # Create new item
+            item = AppraisalItem(
+                project_id=item_create.project_id,
+                photo_id=item_create.photo_id,
+                line_number=item_create.line_number,
+                room_area=item_create.room_area,
+                floor_building=item_create.floor_building,
+                item_type=item_create.item_type,
+                description=item_create.description,
+                appraised_value=item_create.appraised_value,
+                attributes=item_create.attributes,
+                sort_order=item_create.sort_order
+            )
+            
+            db.add(item)
+            db.commit()
+            db.refresh(item)
+            
+            return item
+            
+        except Exception as e:
+            db.rollback()
+            raise e
+    
+    @staticmethod
     def update_appraisal_item(db: Session, item_id: int, item_update: AppraisalItemUpdate) -> Optional[AppraisalItem]:
         """Update an appraisal item"""
         try:
             item = db.query(AppraisalItem).filter(AppraisalItem.id == item_id).first()
             if not item:
                 return None
+            
+            # Update fields if provided
+            if item_update.line_number is not None:
+                item.line_number = item_update.line_number
             
             update_data = item_update.dict(exclude_unset=True)
             for field, value in update_data.items():

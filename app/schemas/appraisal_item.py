@@ -31,7 +31,8 @@ class AppraisalItemBase(BaseModel):
     
     @validator('item_type')
     def validate_item_type(cls, v):
-        # Allow any custom value, suggestions provided via schema endpoint
+        if v and v not in ITEM_TYPE_OPTIONS:
+            raise ValueError(f'Invalid item_type. Must be one of: {ITEM_TYPE_OPTIONS}')
         return v
 
 class AppraisalItemCreate(AppraisalItemBase):
@@ -39,12 +40,8 @@ class AppraisalItemCreate(AppraisalItemBase):
     
     @validator('attributes')
     def validate_attributes(cls, v, values):
-        item_type = values.get('item_type')
-        if item_type and item_type in REQUIRED_ATTRIBUTES:
-            required_fields = REQUIRED_ATTRIBUTES[item_type]
-            for field in required_fields:
-                if field not in v or not v[field]:
-                    raise ValueError(f'Required attribute {field} missing for type {item_type}')
+        # Attributes validation is now handled by JSON schemas in appraisal_schemas.py
+        # This allows for flexible attribute structures for different template types
         return v
 
 class AppraisalItemUpdate(BaseModel):
@@ -55,6 +52,7 @@ class AppraisalItemUpdate(BaseModel):
     appraised_value: Optional[float] = None
     photos: Optional[List[str]] = None
     attributes: Optional[Dict[str, Any]] = None
+    line_number: Optional[int] = None
     sort_order: Optional[int] = None
     
     @validator('room_area')
@@ -73,6 +71,8 @@ class AppraisalItemUpdate(BaseModel):
     
     @validator('item_type')
     def validate_item_type(cls, v):
+        # Allow any item_type for flexibility (coin, wine, content, etc.)
+        # Validation is now handled by JSON schemas
         # Allow any custom value, suggestions provided via schema endpoint
         return v
 
