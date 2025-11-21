@@ -94,7 +94,8 @@ Condition:
 Rarity: 
 Provenance: """,
 
-    "Contents": """Brand Name: 
+    "Contents": """Description: 
+Brand Name: 
 Manufacturer: 
 Model Number: 
 Serial Number: 
