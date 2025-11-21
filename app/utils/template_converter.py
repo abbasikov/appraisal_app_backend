@@ -876,41 +876,20 @@ def _handle_textboxes_first_page(doc: Document, field_mappings: Dict, project_da
     try:
         # Get special fields for replacement
         client_data = project_data.get('client', {})
-        account_data = project_data.get('account', {})
-        did_inspect = project_data.get('did_inspect')
-        inspection_placeholders = _get_inspection_placeholders(did_inspect)
-
-        # DEBUG: Log the raw data we're working with
-        logger.info("=" * 80)
-        logger.info("📊 TEXT BOX DATA DEBUG:")
-        logger.info(f"client_data keys: {list(client_data.keys())}")
-        logger.info(f"account_data keys: {list(account_data.keys())}")
-        logger.info(f"account_data content: {account_data}")
-        logger.info(f"law_firm value will be: '{account_data.get('name', '')}'")
-        logger.info("=" * 80)
-        
+        from datetime import datetime
         special_fields = {
             'case_name': client_data.get('case_name', 'Estate Appraisal'),
             'inspection_date': _format_date(project_data.get('inspection_date', '')),
             'current_date': datetime.now().strftime('%B %d, %Y'),
             'report_date': _format_date(project_data.get('report_date', datetime.now().strftime('%Y-%m-%d'))),
-            'effective_date': _format_date(project_data.get('effective_date', '')),
-            'appraisal_location': project_data.get('appraisal_location', ''),
-            'appraisal_type': project_data.get('appraisal_type', ''),
             'client_name': client_data.get('name', 'Client'),
             'address': f"{client_data.get('address', '')} {client_data.get('city', '')} {client_data.get('state', '')} {client_data.get('zip_code', '')}".strip(),
             'attorney_name': client_data.get('attorney_name', ''),
             'attorney_phone': client_data.get('attorney_phone', ''),
             'attorney_email': client_data.get('attorney_email', ''),
             'death_date': _format_date(client_data.get('date_of_death', '')),
-            'project_name': project_data.get('project_name', 'Appraisal Project'),
-            'estate_of': client_data.get('name', ''),
-            'law_firm': account_data.get('name', ''),  # law_firm uses name from account table
-            **inspection_placeholders
+            'project_name': project_data.get('project_name', 'Appraisal Project')
         }
-        
-        logger.info(f"✅ Special fields prepared: {list(special_fields.keys())}")
-        logger.info(f"   law_firm = '{special_fields.get('law_firm', 'NOT SET')}'")
         
         # Access the document's XML directly to find text boxes
         import re
@@ -922,17 +901,6 @@ def _handle_textboxes_first_page(doc: Document, field_mappings: Dict, project_da
         # Find all shape elements (which include text boxes)
         shape_elements = []
         
-        # Define namespaces for XPath queries
-        namespaces = {
-            'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
-            'wp': 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',
-            'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
-            'wps': 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape',
-            'mc': 'http://schemas.openxmlformats.org/markup-compatibility/2006',
-            'v': 'urn:schemas-microsoft-com:vml',
-            'pic': 'http://schemas.openxmlformats.org/drawingml/2006/picture'
-        }
-        
         # Look for shape elements in the document XML - multiple possible structures
         xpath_patterns = [
             './/w:drawing//wp:inline//a:graphic//a:graphicData//wps:txbx//w:p',  # Standard inline text boxes
@@ -943,10 +911,10 @@ def _handle_textboxes_first_page(doc: Document, field_mappings: Dict, project_da
             './/w:drawing//wp:anchor//a:graphic//a:graphicData//v:shape//v:textbox//w:p',  # Mixed format anchored
         ]
         
-        # Try each XPath pattern with proper namespaces
+        # Try each XPath pattern
         for xpath_pattern in xpath_patterns:
             try:
-                elements = document_part.element.xpath(xpath_pattern, namespaces=namespaces)
+                elements = document_part.element.xpath(xpath_pattern)
                 logger.info(f"Found {len(elements)} text box paragraphs using pattern: {xpath_pattern}")
                 shape_elements.extend(elements)
             except Exception as e:
@@ -973,44 +941,17 @@ def _handle_textboxes_first_page(doc: Document, field_mappings: Dict, project_da
         # Also try to find text frames (another type of text container)
         try:
             # Look for text frames in the document
-            frame_elements = document_part.element.xpath('.//w:txbxContent//w:p', namespaces=namespaces)
+            frame_elements = document_part.element.xpath('.//w:txbxContent//w:p')
             logger.info(f"Found {len(frame_elements)} text frame paragraphs")
             shape_elements.extend(frame_elements)
         except Exception as e:
             logger.warning(f"Error finding text frames: {str(e)}")
             
-        # Try a direct XML approach for text boxes - LIMITED TO FIRST PAGE ONLY
+        # Try a direct XML approach for text boxes
         try:
-            # Find text elements in the first page only
-            # Strategy: Find elements up to the first page break
-            body = document_part.element.find('.//w:body', namespaces=namespaces)
-            if body is None:
-                logger.warning("Could not find document body")
-                return False
-            
-            # Collect text elements until we hit a page break
-            text_elements = []
-            first_page_break_found = False
-            
-            for child in body:
-                # Check if this element or its descendants contain a page break
-                page_breaks = child.findall('.//w:br[@w:type="page"]', namespaces=namespaces)
-                if page_breaks:
-                    logger.info(f"Found first page break, stopping text element collection")
-                    first_page_break_found = True
-                    break
-                
-                # Collect all text elements from this paragraph/element
-                child_text_elements = child.findall('.//w:t', namespaces=namespaces)
-                text_elements.extend(child_text_elements)
-            
-            logger.info(f"Found {len(text_elements)} text elements on FIRST PAGE ONLY to check for placeholders")
-            
-            # DEBUG: Sample the first 10 text elements to see what we're working with
-            logger.info("📝 SAMPLE OF TEXT ELEMENTS (first 10):")
-            for idx, elem in enumerate(text_elements[:10]):
-                text_sample = (elem.text or "")[:100]
-                logger.info(f"   [{idx}] {text_sample}")
+            # Find all text elements that might contain placeholders
+            text_elements = document_part.element.xpath('.//w:t')
+            logger.info(f"Found {len(text_elements)} text elements to check for placeholders")
             
             # First check for malformed placeholders like {}case_name and fix them
             for text_element in text_elements:
@@ -1057,26 +998,12 @@ def _handle_textboxes_first_page(doc: Document, field_mappings: Dict, project_da
                                 value = ''
                             
                             # Replace directly in the text content
-                            old_modified = modified_text
                             modified_text = modified_text.replace(placeholder, str(value))
-                            logger.info(f"   ✏️  Replaced in text: '{old_modified}' -> '{modified_text}'")
                         
                         # Update the text element directly
-                        logger.info(f"   💾 Setting text element to: '{modified_text}'")
                         text_element.text = modified_text
-                        logger.info(f"   ✅ Text element updated successfully")
-            
-            # Summary
-            logger.info("=" * 80)
-            logger.info("📊 TEXT BOX REPLACEMENT SUMMARY:")
-            logger.info(f"   Total text elements checked: {len(text_elements)}")
-            placeholders_found = sum(1 for elem in text_elements if elem.text and '{' in elem.text and '}' in elem.text)
-            logger.info(f"   Text elements with placeholders: {placeholders_found}")
-            logger.info("=" * 80)
         except Exception as e:
-            logger.error(f"❌ Error with direct XML approach: {str(e)}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
+            logger.warning(f"Error with direct XML approach: {str(e)}")
         
         # Process each shape element
         for i, shape_element in enumerate(shape_elements):
