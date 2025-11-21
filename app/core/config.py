@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+
+    # Optional: API key for MetalpriceAPI (historical metals prices)
+    metalprice_api_key: str | None = None
     
     class Config:
         env_file = ".env"
