@@ -1431,7 +1431,7 @@ def _handle_appraisal_items(doc: Document, project_data: Dict):
                 parent.remove(blank_p)
                 parent.insert(current_index, blank_p)
                 
-                # Insert fair market value with dotted leader up to margin
+                # Insert value label with dotted leader up to margin
                 current_index += 1
                 p = doc.add_paragraph()
                 parent.remove(p._element)
@@ -1442,7 +1442,10 @@ def _handle_appraisal_items(doc: Document, project_data: Dict):
                 tab_stops.add_tab_stop(Inches(6.5), WD_ALIGN_PARAGRAPH.RIGHT, leader=1)  # 6.5" typical page width
 
                 # Add text + tab + value
-                run = p.add_run("Fair Market Value")
+                value_label = "Fair Market Value"
+                if _is_replacement_domain(project_data):
+                    value_label = "Replacement Value"
+                run = p.add_run(value_label)
                 run = p.add_run("\t")
                 run = p.add_run(f"${appraised_value:.2f}")
 
@@ -1574,8 +1577,10 @@ def _handle_appraisal_items(doc: Document, project_data: Dict):
                     doc.add_paragraph(description.strip())
                     logger.info(f"Added description for Item {i} (fallback): {description[:50]}...")
                 
-                # Add fair market value with dots
+                # Add value label with dots
                 fmv_text = "Fair Market Value"
+                if _is_replacement_domain(project_data):
+                    fmv_text = "Replacement Value"
                 price_text = f"${appraised_value:.2f}"
                 
                 # Calculate dots needed (approximate)
@@ -1634,9 +1639,19 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
     
     # Build full address
     full_address = f"{client_data.get('address', '')} {client_data.get('city', '')} {client_data.get('state', '')} {client_data.get('zip_code', '')}".strip()
-    
-    # Fixed metal prices
-    gold_price = 115.65
+
+    # Dynamic metal prices (numeric values provided via project_data by TemplateService)
+    def _format_price(value, default: str = "") -> str:
+        try:
+            if value is None or value == "":
+                return default
+            return f"${float(value):.2f}"
+        except Exception:
+            return default
+
+    gold_price_value = project_data.get('gold_price')
+    silver_price_value = project_data.get('silver_price')
+    plat_price_value = project_data.get('plat_price')
     
     # Comprehensive field mapping
     field_mappings = {
@@ -1651,9 +1666,9 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
         'address': full_address,
         'death_date': _format_date(client_data.get('date_of_death')),
         'total_value': f"${project_data.get('total_value', '0.00')}",
-        'gold_price': f"${gold_price:.2f}",
-        'silver_price': '$1.32',
-        'plat_price': '$45.10',
+        'gold_price': _format_price(gold_price_value),
+        'silver_price': _format_price(silver_price_value),
+        'plat_price': _format_price(plat_price_value),
         'case_number': project_data.get('case_number', ''),
         'project_name': project_data.get('project_name', ''),
         
@@ -1780,6 +1795,19 @@ def _format_date(date_value) -> str:
     except Exception as e:
         logger.warning(f"Error formatting date {date_value}: {str(e)}")
         return str(date_value) if date_value and str(date_value) != 'None' else ""
+
+
+def _is_replacement_domain(project_data: Dict) -> bool:
+    """Return True if the appraisal domain is a replacement-style valuation.
+
+    This uses project_data['appraisal_domain'], which comes from the Project.appraisal_type
+    enum (e.g. DIVORCE, ESTATE, INSURANCE, REPLACEMENT, etc.). For replacement-style
+    reports we treat INSURANCE and REPLACEMENT as using "Replacement Value" language
+    instead of "Fair Market Value".
+    """
+
+    domain = (project_data.get('appraisal_domain') or '').upper()
+    return domain in ('INSURANCE', 'REPLACEMENT')
 
 def _get_field_value(field_name: str, field_config: Dict, project_data: Dict) -> str:
     """Fallback field value getter for unmapped fields"""
@@ -2187,6 +2215,21 @@ def _add_images_after_table_coin_wine(doc: Document, items: list, tbl_element, p
         parent.insert(current_insert_index, final_break)
         logger.info("✅ Added page break after last image group")
 
+        # After inserting all coin/wine images, clear any content between the
+        # last image block and the SUMMARY section so that the summary starts
+        # immediately after the image pages.
+        try:
+            last_para_index = None
+            for i, paragraph in enumerate(doc.paragraphs):
+                if paragraph._element is final_break:
+                    last_para_index = i
+                    break
+
+            if last_para_index is not None:
+                _cleanup_content_between_images_and_summary(doc, last_para_index)
+        except Exception as e:
+            logger.warning(f"Unable to cleanup content between coin/wine images and summary: {str(e)}")
+
     logger.info(f"✅ Total images added after table: {images_added}")
     return images_added
 
@@ -2495,8 +2538,8 @@ def _handle_content_table(doc: Document, project_data: Dict):
         # Add "PHOTOS OF CONTENTS" section with images and line numbers
         _add_content_photos_after_table(doc, line_mappings, new_tbl_element, parent)
 
-        # Add room-by-room summary table (AREA/ROOM + TOTAL FMV + grand total)
-        _add_content_summary_table(doc, line_mappings)
+        # Add room-by-room summary table (AREA/ROOM + total value + grand total)
+        _add_content_summary_table(doc, line_mappings, project_data)
 
         logger.info(f"✅ Content table, photos, and summary generated for {len(line_mappings)} items")
     else:
@@ -2524,6 +2567,7 @@ def _add_content_photos_after_table(doc: Document, line_mappings: list, tbl_elem
         parent.insert(tbl_index + 1, page_break_p)
 
         current_insert_index = tbl_index + 2
+        last_photo_para_element = None
 
         # Add heading: PHOTOS OF CONTENTS
         heading_para = doc.add_paragraph()
@@ -2568,13 +2612,57 @@ def _add_content_photos_after_table(doc: Document, line_mappings: list, tbl_elem
                 body.remove(para_element)
             parent.insert(current_insert_index, para_element)
             current_insert_index += 1
+            last_photo_para_element = para_element
+
+        # After inserting all content photos, clear any content between the
+        # last photo paragraph and the SUMMARY section so that the summary
+        # appears immediately after the photos.
+        if last_photo_para_element is not None:
+            try:
+                last_para_index = None
+                for i, paragraph in enumerate(doc.paragraphs):
+                    if paragraph._element is last_photo_para_element:
+                        last_para_index = i
+                        break
+
+                if last_para_index is not None:
+                    _cleanup_content_between_images_and_summary(doc, last_para_index)
+            except Exception as e:
+                logger.warning(f"Unable to cleanup content between content photos and summary: {str(e)}")
+
+        # As an extra safety measure for CONTENT templates, remove any leftover
+        # template placeholder paragraphs such as 'PHOTOS-OF-CONTENTS' and
+        # '<PHOTO-OF-CONTENT>' that may still exist in the document. These
+        # placeholders are specific to the CONTENT template and should not
+        # appear in the final report.
+        try:
+            placeholder_elements = []
+            for para in doc.paragraphs:
+                text = para.text.strip().upper()
+                if ("PHOTOS-OF-CONTENTS" in text) or ("<PHOTO-OF-CONTENT>" in text):
+                    placeholder_elements.append(para._element)
+
+            removed_count = 0
+            for el in placeholder_elements:
+                parent_el = el.getparent()
+                if parent_el is not None:
+                    try:
+                        parent_el.remove(el)
+                        removed_count += 1
+                    except Exception as rem_err:
+                        logger.warning(f"Could not remove content photo placeholder element: {rem_err}")
+
+            if removed_count:
+                logger.info(f"✅ Removed {removed_count} PHOTOS-OF-CONTENTS placeholder paragraph(s) from content template")
+        except Exception as e:
+            logger.warning(f"Error while removing PHOTOS-OF-CONTENTS placeholders: {str(e)}")
 
         logger.info("✅ PHOTOS OF CONTENTS section added")
     except Exception as e:
         logger.error(f"Error while adding PHOTOS OF CONTENTS section: {str(e)}")
 
 
-def _add_content_summary_table(doc: Document, line_mappings: list):
+def _add_content_summary_table(doc: Document, line_mappings: list, project_data: Dict):
     """Add a room-by-room SUMMARY table for content templates.
 
     The summary lists AREA/ROOM and TOTAL FMV per area, followed by a TOTAL row.
@@ -2651,10 +2739,61 @@ def _add_content_summary_table(doc: Document, line_mappings: list):
         logger.warning("⚠️ No SUMMARY section with table found for contents, skipping summary replacement")
         return
 
+    # Remove any empty/whitespace-only paragraphs immediately before the SUMMARY heading
+    try:
+        summary_para_element = summary_paragraph._element
+        summary_para_index = list(parent).index(summary_para_element)
+        check_index = summary_para_index - 1
+        removed_before_summary = 0
+        while check_index >= 0:
+            parent_elements = list(parent)
+            if check_index >= len(parent_elements):
+                break
+            element = parent_elements[check_index]
+            should_remove = False
+            if element.tag.endswith('}p'):
+                full_text = ''.join(element.itertext()) if hasattr(element, 'itertext') else ''
+                if not full_text or not full_text.strip() or full_text.isspace():
+                    should_remove = True
+            if should_remove:
+                parent.remove(element)
+                removed_before_summary += 1
+                summary_para_index -= 1
+                check_index -= 1
+            else:
+                break
+        if removed_before_summary > 0:
+            logger.info(f"✅ Removed {removed_before_summary} empty/whitespace paragraph(s) before content SUMMARY heading")
+    except Exception as e:
+        logger.warning(f"Could not clean whitespace before content SUMMARY heading: {str(e)}")
+
+    # Insert a page break just BEFORE the content SUMMARY heading so the content
+    # summary starts on a new page
+    try:
+        # Recalculate the current index of the summary paragraph (it may have shifted)
+        summary_para_index = list(parent).index(summary_para_element)
+
+        page_break_before_summary = doc.add_paragraph()._element
+        tmp_parent = page_break_before_summary.getparent()
+        if tmp_parent is not None:
+            tmp_parent.remove(page_break_before_summary)
+
+        parent.insert(summary_para_index, page_break_before_summary)
+
+        for p in doc.paragraphs:
+            if p._element is page_break_before_summary:
+                run = p.add_run()
+                run.add_break(WD_BREAK.PAGE)
+                break
+
+        logger.info("✅ Added page break BEFORE content SUMMARY heading")
+    except Exception as e:
+        logger.warning(f"Could not insert page break before content SUMMARY heading: {str(e)}")
+
     tbl_element = summary_table_to_replace._element
     tbl_index = list(parent).index(tbl_element)
 
-    # Create new SUMMARY table: AREA/ROOM | TOTAL FMV
+    # Create new SUMMARY table: AREA/ROOM | TOTAL (FMV or Replacement Value)
     rows_needed = len(room_totals) + 1  # +1 for TOTAL row
     new_summary_table = doc.add_table(rows=1 + rows_needed, cols=2)
 
@@ -2666,7 +2805,12 @@ def _add_content_summary_table(doc: Document, line_mappings: list):
     # Header row
     header_cells = new_summary_table.rows[0].cells
     header_cells[0].text = "AREA/ROOM"
-    header_cells[1].text = "TOTAL FMV"
+
+    # Use replacement wording for replacement-style domains
+    value_header = "TOTAL FMV"
+    if _is_replacement_domain(project_data):
+        value_header = "TOTAL REPLACEMENT VALUE"
+    header_cells[1].text = value_header
 
     for cell in header_cells:
         cell.height = Pt(25)
@@ -2894,6 +3038,63 @@ def _add_summary_table(doc: Document, items: list, item_type: str, project_data:
     summary_para_element = summary_paragraph._element
     summary_para_index = list(parent).index(summary_para_element)
 
+    # Remove any empty/whitespace-only paragraphs immediately before the summary
+    try:
+        check_index = summary_para_index - 1
+        removed_before_summary = 0
+        while check_index >= 0:
+            parent_elements = list(parent)
+            if check_index >= len(parent_elements):
+                break
+            element = parent_elements[check_index]
+            should_remove = False
+            if element.tag.endswith('}p'):
+                full_text = ''.join(element.itertext()) if hasattr(element, 'itertext') else ''
+                if not full_text or not full_text.strip() or full_text.isspace():
+                    should_remove = True
+            if should_remove:
+                parent.remove(element)
+                removed_before_summary += 1
+                summary_para_index -= 1
+                check_index -= 1
+            else:
+                break
+        if removed_before_summary > 0:
+            logger.info(f"✅ Removed {removed_before_summary} empty/whitespace paragraph(s) before summary heading")
+    except Exception as e:
+        logger.warning(f"Could not clean whitespace before summary heading: {str(e)}")
+
+    # Insert a page break just BEFORE the SUMMARY heading so the summary starts on a new page
+    try:
+        # Recalculate the current index of the summary paragraph (it may have shifted)
+        summary_para_index = list(parent).index(summary_para_element)
+
+        page_break_before_summary = doc.add_paragraph()._element
+        # Remove from its temporary parent (document body) and insert before summary
+        tmp_parent = page_break_before_summary.getparent()
+        if tmp_parent is not None:
+            tmp_parent.remove(page_break_before_summary)
+
+        parent.insert(summary_para_index, page_break_before_summary)
+
+        # Attach the actual page break to the newly inserted paragraph
+        for p in doc.paragraphs:
+            if p._element is page_break_before_summary:
+                run = p.add_run()
+                run.add_break(WD_BREAK.PAGE)
+                break
+
+        # IMPORTANT: After inserting the page-break paragraph before the summary,
+        # the index of the SUMMARY heading shifts by +1. Recalculate
+        # summary_para_index so later cleanup starts from the heading itself,
+        # not from the page-break paragraph. This preserves the intentional
+        # page break we just added.
+        summary_para_index = list(parent).index(summary_para_element)
+
+        logger.info("✅ Added page break BEFORE SUMMARY heading")
+    except Exception as e:
+        logger.warning(f"Could not insert page break before summary heading: {str(e)}")
+
     is_image_based = (item_type == 'image_based')
 
     # For coin/wine/content we keep the aggressive cleanup and page break before summary.
@@ -3083,10 +3284,14 @@ def _add_summary_table(doc: Document, items: list, item_type: str, project_data:
         row.cells[0].width = 3250000  # ~3.25 inches
         row.cells[1].width = 3250000  # ~3.25 inches
     
-    # Row 1 (Headers): Total number of items | Total appraised value
+    # Row 1 (Headers): Total number of items | Total value label
     header_cells = new_summary_table.rows[0].cells
     header_cells[0].text = "Total number of items"
-    header_cells[1].text = "Total appraised value"
+
+    value_header = "Total appraised value"
+    if _is_replacement_domain(project_data):
+        value_header = "Total replacement value"
+    header_cells[1].text = value_header
     
     # Make header row bold and taller with 14pt font
     for cell in header_cells:
@@ -3802,17 +4007,18 @@ def _clear_content_between_item1_and_last_fmv(doc: Document, item1_paragraph) ->
         
         # Skip excessive paragraph logging
         
-        # Find the last Fair Market Value paragraph
+        # Find the last value paragraph ("Fair Market Value" or "Replacement Value"), case-insensitive
         last_fmv_index = -1
         for i in range(len(doc.paragraphs) - 1, item1_index, -1):  # Search backwards from end
             text = doc.paragraphs[i].text.strip()
-            if 'Fair Market Value' in text and '$' in text:
+            lower_text = text.lower()
+            if (("fair market value" in lower_text) or ("replacement value" in lower_text)) and '$' in text:
                 last_fmv_index = i
-                logger.info(f"Found last Fair Market Value at paragraph {i}: {text[:50]}...")
+                logger.info(f"Found last value line at paragraph {i}: {text[:50]}...")
                 break
         
         if last_fmv_index == -1:
-            logger.info("No existing Fair Market Value found, will clear content after Item 1")
+            logger.info("No existing value line found, will clear content after Item 1 using summary/TOTAL boundary")
             # If no FMV found, clear everything after Item 1 until we hit a summary section
             for i in range(len(doc.paragraphs) - 1, item1_index, -1):
                 text = doc.paragraphs[i].text.strip()

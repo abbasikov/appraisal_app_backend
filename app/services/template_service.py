@@ -3,9 +3,11 @@ import shutil
 from typing import List, Optional, Dict
 from sqlalchemy.orm import Session, joinedload
 from fastapi import UploadFile, HTTPException
+import requests
 from app.models.template import Template
 from app.models.project import Project
 from app.models.report import Report, ReportType
+from app.models.metals_price import MetalsPrice, MetalType
 from app.utils.template_converter import (
     convert_docx_to_fillable, 
     generate_report_from_template,
@@ -211,6 +213,143 @@ class TemplateService:
             else:
                 logger.warning("⚠️  No account_id set for this project")
             
+            # Look up precious metals prices based on effective_date, to be used
+            # for template placeholders like gold_price, silver_price, plat_price.
+            effective_date = project.effective_date
+
+            def _fetch_metals_from_external(date_):
+                """Fetch historical metal prices for the exact date from MetalpriceAPI.
+
+                Reads the API key from METALPRICE_API_KEY (preferred) or METALS_API_KEY
+                environment variable. Called at most once per report generation and
+                results are cached in the database.
+                """
+                api_key = (
+                    os.environ.get("METALPRICE_API_KEY")
+                    or os.environ.get("METALS_API_KEY")
+                    or os.environ.get("metalprice_api_key")
+                )
+                if not api_key or not date_:
+                    logger.warning("MetalpriceAPI key not set or effective_date missing; skipping external metals fetch")
+                    return {}
+
+                try:
+                    try:
+                        date_str = date_.strftime("%Y-%m-%d")
+                    except Exception:
+                        date_str = str(date_)
+
+                    # MetalpriceAPI historical endpoint: /v1/YYYY-MM-DD
+                    url = f"https://api.metalpriceapi.com/v1/{date_str}"
+                    params = {
+                        "api_key": api_key,
+                        "base": "USD",
+                        "currencies": "XAU,XAG,XPT",
+                    }
+                    resp = requests.get(url, params=params, timeout=10)
+                    resp.raise_for_status()
+                    data = resp.json()
+
+                    if not data.get("success", True):
+                        logger.warning(f"Metals API returned unsuccessful response: {data}")
+                        return {}
+
+                    rates = data.get("rates", {}) or {}
+
+                    # MetalpriceAPI returns both metal-per-USD (XAU, XAG, XPT) and
+                    # USD-per-ounce synthetic pairs (USDXAU, USDXAG, USDXPT).
+                    # We prefer USDXAU/USDXAG/USDXPT when present; otherwise we
+                    # invert XAU/XAG/XPT to get USD per ounce.
+                    def _extract_usd_per_oz(symbol: str, usd_symbol: str):
+                        if usd_symbol in rates:
+                            return rates[usd_symbol]
+                        value = rates.get(symbol)
+                        try:
+                            if value is None:
+                                return None
+                            value_f = float(value)
+                            if value_f == 0:
+                                return None
+                            return 1.0 / value_f
+                        except Exception:
+                            return None
+
+                    result = {}
+                    gold_price = _extract_usd_per_oz("XAU", "USDXAU")
+                    silver_price = _extract_usd_per_oz("XAG", "USDXAG")
+                    platinum_price = _extract_usd_per_oz("XPT", "USDXPT")
+
+                    if gold_price is not None:
+                        result[MetalType.GOLD] = gold_price
+                    if silver_price is not None:
+                        result[MetalType.SILVER] = silver_price
+                    if platinum_price is not None:
+                        result[MetalType.PLATINUM] = platinum_price
+
+                    # Cache in DB for this exact date
+                    for metal_type, price in result.items():
+                        if price is None:
+                            continue
+                        existing = db.query(MetalsPrice).filter(
+                            MetalsPrice.metal_type == metal_type,
+                            MetalsPrice.price_date == date_,
+                        ).first()
+                        if not existing:
+                            db.add(MetalsPrice(
+                                metal_type=metal_type,
+                                price_per_oz=price,
+                                currency="USD",
+                                price_date=date_,
+                                source="metals_api",
+                                is_manual_override=False,
+                            ))
+                    # Flush but don't commit; outer transaction will commit
+                    db.flush()
+
+                    return result
+                except Exception as e:
+                    logger.warning(f"Error fetching metals prices from external API: {e}")
+                    return {}
+
+            external_prices_cache: Dict[MetalType, float] = {}
+
+            def _get_metal_price(metal_type: MetalType):
+                """Return price_per_oz for the given metal and effective_date.
+
+                Strategy:
+                - If effective_date is set, first try exact price_date == effective_date from DB.
+                - If missing, fetch that exact date from external API (once per report),
+                  cache into DB, and use that.
+                - If still missing or no effective_date, fall back to latest available
+                  price in DB.
+                """
+                query = db.query(MetalsPrice).filter(MetalsPrice.metal_type == metal_type)
+
+                if effective_date:
+                    # Exact match for this date in DB
+                    existing_exact = (
+                        query.filter(MetalsPrice.price_date == effective_date)
+                        .order_by(MetalsPrice.created_at.desc())
+                        .first()
+                    )
+                    if existing_exact:
+                        return existing_exact.price_per_oz
+
+                    # If not cached yet, fetch once from external API for this date
+                    if not external_prices_cache:
+                        external_prices_cache.update(_fetch_metals_from_external(effective_date))
+
+                    if metal_type in external_prices_cache:
+                        return external_prices_cache[metal_type]
+
+                # Fallback: latest available price regardless of date
+                latest_any = query.order_by(MetalsPrice.price_date.desc()).first()
+                return latest_any.price_per_oz if latest_any else None
+
+            gold_price = _get_metal_price(MetalType.GOLD)
+            silver_price = _get_metal_price(MetalType.SILVER)
+            platinum_price = _get_metal_price(MetalType.PLATINUM)
+
             project_data = {
                 "project_name": project.project_name,
                 "case_number": project.case_number,
@@ -221,6 +360,10 @@ class TemplateService:
                 "effective_date": str(project.effective_date) if project.effective_date else "",
                 "appraisal_location": project.appraisal_location if project.appraisal_location else "",
                 "total_value": str(total_value),
+                # Metals prices (numeric, will be formatted in template_converter)
+                "gold_price": float(gold_price) if gold_price is not None else None,
+                "silver_price": float(silver_price) if silver_price is not None else None,
+                "plat_price": float(platinum_price) if platinum_price is not None else None,
                 "item_count": str(len(appraisal_items)),
                 "did_inspect": did_inspect,
                 "account": account_dict,  # Add account data here
