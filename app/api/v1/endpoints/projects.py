@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from app.db.database import get_db
 from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse
 from app.schemas.photo import PhotoResponse, PaginatedPhotosResponse
@@ -277,6 +277,7 @@ async def generate_project_report(
     project_id: int,
     template_id: int,
     report_type: str = Query("final", description="Report type: 'draft' or 'final'"),
+    did_inspect: Optional[bool] = Query(None, description="Whether appraiser personally inspected and was present"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -304,7 +305,7 @@ async def generate_project_report(
             )
         
         report_path = TemplateService.generate_report(
-            db, template_id, project_id, report_type
+            db, template_id, project_id, report_type, did_inspect
         )
         
         return {

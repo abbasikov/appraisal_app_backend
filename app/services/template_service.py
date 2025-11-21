@@ -1,7 +1,7 @@
 import os
 import shutil
 from typing import List, Optional, Dict
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from fastapi import UploadFile, HTTPException
 from app.models.template import Template
 from app.models.project import Project
@@ -109,14 +109,14 @@ class TemplateService:
     
     @staticmethod
     def generate_report(db: Session, template_id: int, project_id: int, 
-                       report_type: str = "final") -> str:
+                       report_type: str = "final", did_inspect: Optional[bool] = None) -> str:
         """Generate report from template and project data"""
         try:
             template = db.query(Template).filter(Template.id == template_id).first()
             if not template:
                 raise HTTPException(status_code=404, detail="Template not found")
             
-            project = db.query(Project).filter(Project.id == project_id).first()
+            project = db.query(Project).options(joinedload(Project.account)).filter(Project.id == project_id).first()
             if not project:
                 raise HTTPException(status_code=404, detail="Project not found")
             
@@ -146,14 +146,84 @@ class TemplateService:
             else:
                 logger.warning("No client data found for project")
             
+            # Extract template type from template name BEFORE creating project_data
+            template_type = project.appraisal_type.value if project.appraisal_type else ""
+            
+            # Try to extract the actual item type from template name
+            import re
+            template_name_lower = template.name.lower()
+            keywords = ['wine', 'wines', 'coin', 'coins', 'jewellery', 'jewelry', 'artwork', 'art', 
+                       'auto', 'automobile', 'firearms', 'firearm', 'handbag', 'handbags', 'watch', 
+                       'watches', 'content', 'contents', 'inventory']
+            
+            words = re.split(r'[\s\-_]+', template_name_lower)
+            for word in words:
+                if word in keywords:
+                    template_type = word.capitalize() if word != 'jewelry' else 'Jewellery'
+                    if word in ['wines']: template_type = 'Wine'
+                    elif word in ['coins']: template_type = 'Coins'
+                    elif word in ['contents', 'inventory']: template_type = 'Contents'
+                    elif word in ['watches']: template_type = 'Watches'
+                    elif word in ['art']: template_type = 'Artwork'
+                    elif word in ['auto', 'automobile']: template_type = 'Auto'
+                    elif word in ['firearms', 'firearm']: template_type = 'Firearms'
+                    elif word in ['handbags']: template_type = 'Handbag'
+                    break
+            
+            logger.info(f"Detected template_type: '{template_type}' from template name: '{template.name}'")
+            
+            # Load account data
+            logger.info(f"Loading account data for project.account_id: {project.account_id}")
+            account_dict = {}
+            if project.account_id:
+                if project.account:
+                    account_dict = {
+                        "id": project.account.id,
+                        "name": project.account.name,
+                        "account_type": project.account.account_type.value if project.account.account_type else "",
+                        "address": project.account.address or "",
+                        "city": project.account.city or "",
+                        "state": project.account.state or "",
+                        "zip_code": project.account.zip_code or "",
+                        "phone": project.account.phone or "",
+                        "email": project.account.email or ""
+                    }
+                    logger.info(f"✅ Account loaded from relationship: name='{account_dict.get('name', '')}'")
+                else:
+                    # Fallback: manual query if relationship didn't load
+                    from app.models.account import Account
+                    account = db.query(Account).filter(Account.id == project.account_id).first()
+                    if account:
+                        account_dict = {
+                            "id": account.id,
+                            "name": account.name,
+                            "account_type": account.account_type.value if account.account_type else "",
+                            "address": account.address or "",
+                            "city": account.city or "",
+                            "state": account.state or "",
+                            "zip_code": account.zip_code or "",
+                            "phone": account.phone or "",
+                            "email": account.email or ""
+                        }
+                        logger.info(f"✅ Account loaded manually: name='{account_dict.get('name', '')}'")
+                    else:
+                        logger.warning(f"❌ Account with ID {project.account_id} not found")
+            else:
+                logger.warning("⚠️  No account_id set for this project")
+            
             project_data = {
                 "project_name": project.project_name,
                 "case_number": project.case_number,
-                "appraisal_type": project.appraisal_type.value if project.appraisal_type else "",
+                "appraisal_type": template_type,  # Use detected template type instead of domain
+                "appraisal_domain": project.appraisal_type.value if project.appraisal_type else "",  # Keep domain separate
                 "inspection_date": str(project.inspection_date) if project.inspection_date else "",
                 "report_date": str(project.report_date) if project.report_date else "",
+                "effective_date": str(project.effective_date) if project.effective_date else "",
+                "appraisal_location": project.appraisal_location if project.appraisal_location else "",
                 "total_value": str(total_value),
                 "item_count": str(len(appraisal_items)),
+                "did_inspect": did_inspect,
+                "account": account_dict,  # Add account data here
                 "client": {
                     "name": project.client.name if project.client else "",
                     "attorney_name": project.client.attorney_name if project.client else "",
@@ -201,18 +271,43 @@ class TemplateService:
             
             template_path = template.fillable_file_path or template.file_path
             
-            # Detect template category
+            # Detect template category and extract template type
             from app.utils.template_detector import detect_template_category
             template_category = detect_template_category(template.name)
             
-            logger.info(f"Generating report with category='{template_category.value}', report_type='{report_type}', add_watermark={report_type == 'draft'}")
+            # Extract template type (wine, jewellery, coin, etc.) from template name
+            template_type = project.appraisal_type.value if project.appraisal_type else ""
+            
+            # Try to extract the actual item type from template name
+            import re
+            template_name_lower = template.name.lower()
+            keywords = ['wine', 'wines', 'coin', 'coins', 'jewellery', 'jewelry', 'artwork', 'art', 
+                       'auto', 'automobile', 'firearms', 'firearm', 'handbag', 'handbags', 'watch', 
+                       'watches', 'content', 'contents', 'inventory']
+            
+            words = re.split(r'[\s\-_]+', template_name_lower)
+            for word in words:
+                if word in keywords:
+                    template_type = word.capitalize() if word != 'jewelry' else 'Jewellery'
+                    if word in ['wines']: template_type = 'Wine'
+                    elif word in ['coins']: template_type = 'Coins'
+                    elif word in ['contents', 'inventory']: template_type = 'Contents'
+                    elif word in ['watches']: template_type = 'Watches'
+                    elif word in ['art']: template_type = 'Artwork'
+                    elif word in ['auto', 'automobile']: template_type = 'Auto'
+                    elif word in ['firearms', 'firearm']: template_type = 'Firearms'
+                    elif word in ['handbags']: template_type = 'Handbag'
+                    break
+            
+            logger.info(f"Generating report with category='{template_category.value}', template_type='{template_type}', report_type='{report_type}', add_watermark={report_type == 'draft'}")
             logger.info(f"📊 Using {len(appraisal_items)} items from JSONB attributes (scalable approach)")
             
             generated_path = generate_report_from_template(
                 template_path, output_path, 
                 template.field_mappings or {}, project_data,
                 template_category=template_category.value,
-                add_watermark=(report_type == "draft")
+                add_watermark=(report_type == "draft"),
+                did_inspect=did_inspect
             )
             
             report = Report(

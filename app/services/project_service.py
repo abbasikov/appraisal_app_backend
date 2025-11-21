@@ -33,6 +33,8 @@ class ProjectService:
                 purpose=project.purpose.strip() if project.purpose else None,
                 inspection_date=project.inspection_date,
                 report_date=project.report_date,
+                effective_date=project.effective_date,
+                appraisal_location=project.appraisal_location.strip() if project.appraisal_location else None,
                 template_id=project.template_id,
                 notes=project.notes.strip() if project.notes else None
             )
@@ -91,6 +93,8 @@ class ProjectService:
                 "purpose": project.purpose,
                 "inspection_date": project.inspection_date,
                 "report_date": project.report_date,
+                "effective_date": project.effective_date,
+                "appraisal_location": project.appraisal_location,
                 "assigned_user_id": project.assigned_user_id,
                 "assigned_user_name": f"{user_first} {user_last}" if user_first else None,
                 "status": project.status.value,
@@ -156,7 +160,10 @@ class ProjectService:
         
         update_data = project_update.dict(exclude_unset=True)
         for field, value in update_data.items():
-            setattr(project, field, value)
+            if field == 'appraisal_location' and value:
+                setattr(project, field, value.strip())
+            else:
+                setattr(project, field, value)
         
         db.commit()
         db.refresh(project)

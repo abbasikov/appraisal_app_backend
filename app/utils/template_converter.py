@@ -1,6 +1,6 @@
 import re
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 from docx import Document
 from docx.shared import Inches, RGBColor, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
@@ -9,11 +9,7 @@ from docx.oxml.shared import OxmlElement, qn
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 import logging
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
-from docx.shared import Pt
-from docx import Document
-
+from datetime import datetime
 
 
 logger = logging.getLogger(__name__)
@@ -128,27 +124,34 @@ def _determine_field_type(field_name: str) -> str:
 def generate_report_from_template(template_path: str, output_path: str, 
                                 field_mappings: Dict, project_data: Dict, 
                                 template_category: str = "image_based",
-                                add_watermark: bool = False) -> str:
+                                add_watermark: bool = False,
+                                did_inspect: Optional[bool] = None) -> str:
     """Generate report from template using project data"""
     try:
         doc = Document(template_path)
         logger.info("⭐⭐⭐ DOCUMENT LOADED SUCCESSFULLY ⭐⭐⭐")
         
-        # Replace text fields in main document paragraphs
+        # STEP 1: Handle text boxes FIRST (they are most sensitive to document structure changes)
+        logger.info("💬💬💬 STEP 1: PROCESSING TEXT BOXES (BEFORE ANY OTHER MODIFICATIONS) 💬💬💬")
+        _handle_textboxes_first_page(doc, field_mappings, project_data)
+        logger.info("💬💬💬 TEXT BOX PROCESSING COMPLETED 💬💬💬")
+        
+        # STEP 2: Do a comprehensive placeholder replacement for regular content
+        # This ensures placeholders are replaced while document structure is intact
+        logger.info("🔍🔍🔍 STEP 2: PERFORMING COMPREHENSIVE PLACEHOLDER REPLACEMENT 🔍🔍🔍")
+        _final_placeholder_check(doc, field_mappings, project_data)
+        logger.info("🔍🔍🔍 COMPREHENSIVE PLACEHOLDER REPLACEMENT COMPLETED 🔍🔍🔍")
+        
+        # STEP 3: Additional paragraph processing (backup)
         for paragraph in doc.paragraphs:
             _replace_fields_in_paragraph(paragraph, field_mappings, project_data)
         
-        # Replace text fields in tables
+        # STEP 4: Process tables
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
                     for paragraph in cell.paragraphs:
                         _replace_fields_in_paragraph(paragraph, field_mappings, project_data)
-        
-        # Replace text fields in text boxes on the first page
-        logger.info("💬💬💬 ABOUT TO PROCESS TEXT BOXES ON FIRST PAGE 💬💬💬")
-        _handle_textboxes_first_page(doc, field_mappings, project_data)
-        logger.info("💬💬💬 TEXT BOX PROCESSING COMPLETED 💬💬💬")
         
         # Replace text fields in headers and footers
         for section in doc.sections:
@@ -182,9 +185,10 @@ def generate_report_from_template(template_path: str, output_path: str,
         if template_category == TemplateCategory.IMAGE_BASED.value or template_category == "image_based":
             # Use existing image-based logic (BACKWARD COMPATIBLE)
             logger.info("🖼️ Using IMAGE-BASED rendering (photos + descriptions)")
-            _handle_appraisal_items(doc, project_data)
+        _handle_appraisal_items(doc, project_data)
         
-        elif template_category == TemplateCategory.COIN.value or template_category == "coin":
+#-----
+        if template_category == TemplateCategory.COIN.value or template_category == "coin":
             # Use table-based logic for coins
             logger.info("🪙 Using COIN TABLE rendering")
             _handle_coin_table(doc, project_data)
@@ -210,11 +214,6 @@ def generate_report_from_template(template_path: str, output_path: str,
         logger.info("🔄🔄🔄 PERFORMING SPECIAL HEADER/FOOTER PLACEHOLDER CHECK 🔄🔄🔄")
         _ensure_headers_footers_replaced(doc, field_mappings, project_data)
         logger.info("🔄🔄🔄 HEADER/FOOTER PLACEHOLDER CHECK COMPLETED 🔄🔄🔄")
-        
-        # Final pass to catch any remaining placeholders
-        logger.info("🔍🔍🔍 PERFORMING FINAL PLACEHOLDER CHECK 🔍🔍🔍")
-        _final_placeholder_check(doc, field_mappings, project_data)
-        logger.info("🔍🔍🔍 FINAL PLACEHOLDER CHECK COMPLETED 🔍🔍🔍")
         
         # ALWAYS remove any existing watermarks from the template first
         logger.info("🚫🚫🚫 REMOVING EXISTING WATERMARKS FROM TEMPLATE 🚫🚫🚫")
@@ -242,6 +241,25 @@ def generate_report_from_template(template_path: str, output_path: str,
         logger.error(f"Report generation failed: {str(e)}")
         raise ReportGenerationError(f"Failed to generate report: {str(e)}")
 
+def _get_inspection_placeholders(did_inspect: Optional[bool]) -> Dict[str, str]:
+    """Get inspection-related placeholder values based on did_inspect flag"""
+    if did_inspect is True:
+        return {
+            'did_personally_inspect': 'did personally inspected',
+            'was_present': 'was present'
+        }
+    elif did_inspect is False:
+        return {
+            'did_personally_inspect': 'did not personally inspect',
+            'was_present': 'was not present'
+        }
+    else:
+        # If not specified, leave empty (placeholder will remain)
+        return {
+            'did_personally_inspect': '',
+            'was_present': ''
+        }
+
 def _ensure_headers_footers_replaced(doc: Document, field_mappings: Dict, project_data: Dict):
     """Special pass to ensure all header and footer placeholders are replaced"""
     import re
@@ -249,21 +267,30 @@ def _ensure_headers_footers_replaced(doc: Document, field_mappings: Dict, projec
     
     # Special handling for problematic fields
     client_data = project_data.get('client', {})
+    account_data = project_data.get('account', {})
+    did_inspect = project_data.get('did_inspect')
+    inspection_placeholders = _get_inspection_placeholders(did_inspect)
     
     # Ensure we have values for commonly problematic fields
-    from datetime import datetime
+
     special_fields = {
         'case_name': client_data.get('case_name', 'Estate Appraisal'),
         'inspection_date': _format_date(project_data.get('inspection_date', '')),
         'current_date': datetime.now().strftime('%B %d, %Y'),
         'report_date': _format_date(project_data.get('report_date', datetime.now().strftime('%Y-%m-%d'))),
+        'effective_date': _format_date(project_data.get('effective_date', '')),
+        'appraisal_location': project_data.get('appraisal_location', ''),
+        'appraisal_type': project_data.get('appraisal_type', ''),
         'client_name': client_data.get('name', 'Client'),
         'address': f"{client_data.get('address', '')} {client_data.get('city', '')} {client_data.get('state', '')} {client_data.get('zip_code', '')}".strip(),
         'attorney_name': client_data.get('attorney_name', ''),
         'attorney_phone': client_data.get('attorney_phone', ''),
         'attorney_email': client_data.get('attorney_email', ''),
         'death_date': _format_date(client_data.get('date_of_death', '')),
-        'project_name': project_data.get('project_name', 'Appraisal Project')
+        'project_name': project_data.get('project_name', 'Appraisal Project'),
+        'estate_of': client_data.get('name', ''),
+            'law_firm': account_data.get('name', ''),  # law_firm uses name from account table
+        **inspection_placeholders
     }
     
     logger.info(f"Special field values for header/footer check: {special_fields}")
@@ -512,26 +539,34 @@ def _ensure_headers_footers_replaced(doc: Document, field_mappings: Dict, projec
 
 def _final_placeholder_check(doc: Document, field_mappings: Dict, project_data: Dict):
     """Final pass to catch any remaining placeholders in the document"""
-    import re
     pattern = r'\{([^{}]+)\}'
     
     # Special handling for problematic fields
     client_data = project_data.get('client', {})
+    account_data = project_data.get('account', {})
+    did_inspect = project_data.get('did_inspect')
+    inspection_placeholders = _get_inspection_placeholders(did_inspect)
     
     # Ensure we have values for commonly problematic fields
-    from datetime import datetime
+
     special_fields = {
         'case_name': client_data.get('case_name', 'Estate Appraisal'),
         'inspection_date': _format_date(project_data.get('inspection_date', '')),
         'current_date': datetime.now().strftime('%B %d, %Y'),
         'report_date': _format_date(project_data.get('report_date', datetime.now().strftime('%Y-%m-%d'))),
+        'effective_date': _format_date(project_data.get('effective_date', '')),
+        'appraisal_location': project_data.get('appraisal_location', ''),
+        'appraisal_type': project_data.get('appraisal_type', ''),
         'client_name': client_data.get('name', 'Client'),
         'address': f"{client_data.get('address', '')} {client_data.get('city', '')} {client_data.get('state', '')} {client_data.get('zip_code', '')}".strip(),
         'attorney_name': client_data.get('attorney_name', ''),
         'attorney_phone': client_data.get('attorney_phone', ''),
         'attorney_email': client_data.get('attorney_email', ''),
         'death_date': _format_date(client_data.get('date_of_death', '')),
-        'project_name': project_data.get('project_name', 'Appraisal Project')
+        'project_name': project_data.get('project_name', 'Appraisal Project'),
+        'estate_of': client_data.get('name', ''),
+            'law_firm': account_data.get('name', ''),  # law_firm uses name from account table
+        **inspection_placeholders
     }
     
     logger.info(f"Special field values for final check: {special_fields}")
@@ -568,17 +603,26 @@ def _final_placeholder_check(doc: Document, field_mappings: Dict, project_data: 
                     
                     # Replace in the full text
                     full_text = full_text.replace(placeholder, str(value))
+                    logger.info(f"   → Replaced {placeholder} with: {str(value)[:50]}")
+                
+                logger.info(f"Full text after replacements: {full_text[:200]}")
+                logger.info(f"Paragraph has {len(paragraph.runs)} runs")
                 
                 # Special handling for the entire paragraph
                 # This is a more aggressive approach that replaces the entire paragraph text
                 # It may lose some formatting but ensures placeholders are replaced
                 if paragraph.runs:
+                    logger.info(f"Setting first run text to replaced full_text")
                     # Put all text in the first run
                     paragraph.runs[0].text = full_text
+                    logger.info(f"First run text set successfully")
                     
                     # Clear all other runs
                     for i in range(1, len(paragraph.runs)):
                         paragraph.runs[i].text = ''
+                    logger.info(f"Cleared {len(paragraph.runs) - 1} additional runs")
+                else:
+                    logger.warning(f"Paragraph has no runs! Cannot apply replacement.")
     
     # Check all tables
     for table in doc.tables:
@@ -615,12 +659,21 @@ def _final_placeholder_check(doc: Document, field_mappings: Dict, project_data: 
                                 
                                 # Replace in the full text
                                 full_text = full_text.replace(placeholder, str(value))
+                                logger.info(f"   → Replaced {placeholder} in table with: {str(value)[:50]}")
+                            
+                            logger.info(f"Table cell full text after replacements: {full_text[:200]}")
+                            logger.info(f"Table cell paragraph has {len(paragraph.runs)} runs")
                             
                             # Special handling for the entire paragraph
                             if paragraph.runs:
+                                logger.info(f"Setting table cell first run text to replaced full_text")
                                 paragraph.runs[0].text = full_text
+                                logger.info(f"Table cell first run text set successfully")
                                 for i in range(1, len(paragraph.runs)):
                                     paragraph.runs[i].text = ''
+                                logger.info(f"Cleared {len(paragraph.runs) - 1} additional runs in table cell")
+                            else:
+                                logger.warning(f"Table cell paragraph has no runs! Cannot apply replacement.")
     
     # Check headers and footers
     for section in doc.sections:
@@ -828,20 +881,41 @@ def _handle_textboxes_first_page(doc: Document, field_mappings: Dict, project_da
     try:
         # Get special fields for replacement
         client_data = project_data.get('client', {})
-        from datetime import datetime
+        account_data = project_data.get('account', {})
+        did_inspect = project_data.get('did_inspect')
+        inspection_placeholders = _get_inspection_placeholders(did_inspect)
+
+        # DEBUG: Log the raw data we're working with
+        logger.info("=" * 80)
+        logger.info("📊 TEXT BOX DATA DEBUG:")
+        logger.info(f"client_data keys: {list(client_data.keys())}")
+        logger.info(f"account_data keys: {list(account_data.keys())}")
+        logger.info(f"account_data content: {account_data}")
+        logger.info(f"law_firm value will be: '{account_data.get('name', '')}'")
+        logger.info("=" * 80)
+        
         special_fields = {
             'case_name': client_data.get('case_name', 'Estate Appraisal'),
             'inspection_date': _format_date(project_data.get('inspection_date', '')),
             'current_date': datetime.now().strftime('%B %d, %Y'),
             'report_date': _format_date(project_data.get('report_date', datetime.now().strftime('%Y-%m-%d'))),
+            'effective_date': _format_date(project_data.get('effective_date', '')),
+            'appraisal_location': project_data.get('appraisal_location', ''),
+            'appraisal_type': project_data.get('appraisal_type', ''),
             'client_name': client_data.get('name', 'Client'),
             'address': f"{client_data.get('address', '')} {client_data.get('city', '')} {client_data.get('state', '')} {client_data.get('zip_code', '')}".strip(),
             'attorney_name': client_data.get('attorney_name', ''),
             'attorney_phone': client_data.get('attorney_phone', ''),
             'attorney_email': client_data.get('attorney_email', ''),
             'death_date': _format_date(client_data.get('date_of_death', '')),
-            'project_name': project_data.get('project_name', 'Appraisal Project')
+            'project_name': project_data.get('project_name', 'Appraisal Project'),
+            'estate_of': client_data.get('name', ''),
+            'law_firm': account_data.get('name', ''),  # law_firm uses name from account table
+            **inspection_placeholders
         }
+        
+        logger.info(f"✅ Special fields prepared: {list(special_fields.keys())}")
+        logger.info(f"   law_firm = '{special_fields.get('law_firm', 'NOT SET')}'")
         
         # Access the document's XML directly to find text boxes
         import re
@@ -853,6 +927,17 @@ def _handle_textboxes_first_page(doc: Document, field_mappings: Dict, project_da
         # Find all shape elements (which include text boxes)
         shape_elements = []
         
+        # Define namespaces for XPath queries
+        namespaces = {
+            'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+            'wp': 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',
+            'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
+            'wps': 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape',
+            'mc': 'http://schemas.openxmlformats.org/markup-compatibility/2006',
+            'v': 'urn:schemas-microsoft-com:vml',
+            'pic': 'http://schemas.openxmlformats.org/drawingml/2006/picture'
+        }
+        
         # Look for shape elements in the document XML - multiple possible structures
         xpath_patterns = [
             './/w:drawing//wp:inline//a:graphic//a:graphicData//wps:txbx//w:p',  # Standard inline text boxes
@@ -863,10 +948,10 @@ def _handle_textboxes_first_page(doc: Document, field_mappings: Dict, project_da
             './/w:drawing//wp:anchor//a:graphic//a:graphicData//v:shape//v:textbox//w:p',  # Mixed format anchored
         ]
         
-        # Try each XPath pattern
+        # Try each XPath pattern with proper namespaces
         for xpath_pattern in xpath_patterns:
             try:
-                elements = document_part.element.xpath(xpath_pattern)
+                elements = document_part.element.xpath(xpath_pattern, namespaces=namespaces)
                 logger.info(f"Found {len(elements)} text box paragraphs using pattern: {xpath_pattern}")
                 shape_elements.extend(elements)
             except Exception as e:
@@ -893,17 +978,44 @@ def _handle_textboxes_first_page(doc: Document, field_mappings: Dict, project_da
         # Also try to find text frames (another type of text container)
         try:
             # Look for text frames in the document
-            frame_elements = document_part.element.xpath('.//w:txbxContent//w:p')
+            frame_elements = document_part.element.xpath('.//w:txbxContent//w:p', namespaces=namespaces)
             logger.info(f"Found {len(frame_elements)} text frame paragraphs")
             shape_elements.extend(frame_elements)
         except Exception as e:
             logger.warning(f"Error finding text frames: {str(e)}")
             
-        # Try a direct XML approach for text boxes
+        # Try a direct XML approach for text boxes - LIMITED TO FIRST PAGE ONLY
         try:
-            # Find all text elements that might contain placeholders
-            text_elements = document_part.element.xpath('.//w:t')
-            logger.info(f"Found {len(text_elements)} text elements to check for placeholders")
+            # Find text elements in the first page only
+            # Strategy: Find elements up to the first page break
+            body = document_part.element.find('.//w:body', namespaces=namespaces)
+            if body is None:
+                logger.warning("Could not find document body")
+                return False
+            
+            # Collect text elements until we hit a page break
+            text_elements = []
+            first_page_break_found = False
+            
+            for child in body:
+                # Check if this element or its descendants contain a page break
+                page_breaks = child.findall('.//w:br[@w:type="page"]', namespaces=namespaces)
+                if page_breaks:
+                    logger.info(f"Found first page break, stopping text element collection")
+                    first_page_break_found = True
+                    break
+                
+                # Collect all text elements from this paragraph/element
+                child_text_elements = child.findall('.//w:t', namespaces=namespaces)
+                text_elements.extend(child_text_elements)
+            
+            logger.info(f"Found {len(text_elements)} text elements on FIRST PAGE ONLY to check for placeholders")
+            
+            # DEBUG: Sample the first 10 text elements to see what we're working with
+            logger.info("📝 SAMPLE OF TEXT ELEMENTS (first 10):")
+            for idx, elem in enumerate(text_elements[:10]):
+                text_sample = (elem.text or "")[:100]
+                logger.info(f"   [{idx}] {text_sample}")
             
             # First check for malformed placeholders like {}case_name and fix them
             for text_element in text_elements:
@@ -950,12 +1062,26 @@ def _handle_textboxes_first_page(doc: Document, field_mappings: Dict, project_da
                                 value = ''
                             
                             # Replace directly in the text content
+                            old_modified = modified_text
                             modified_text = modified_text.replace(placeholder, str(value))
+                            logger.info(f"   ✏️  Replaced in text: '{old_modified}' -> '{modified_text}'")
                         
                         # Update the text element directly
+                        logger.info(f"   💾 Setting text element to: '{modified_text}'")
                         text_element.text = modified_text
+                        logger.info(f"   ✅ Text element updated successfully")
+            
+            # Summary
+            logger.info("=" * 80)
+            logger.info("📊 TEXT BOX REPLACEMENT SUMMARY:")
+            logger.info(f"   Total text elements checked: {len(text_elements)}")
+            placeholders_found = sum(1 for elem in text_elements if elem.text and '{' in elem.text and '}' in elem.text)
+            logger.info(f"   Text elements with placeholders: {placeholders_found}")
+            logger.info("=" * 80)
         except Exception as e:
-            logger.warning(f"Error with direct XML approach: {str(e)}")
+            logger.error(f"❌ Error with direct XML approach: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
         
         # Process each shape element
         for i, shape_element in enumerate(shape_elements):
@@ -1485,10 +1611,13 @@ def _handle_appraisal_items(doc: Document, project_data: Dict):
 
 def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
     """Get field value from project data using comprehensive mapping"""
-    from datetime import datetime
+
     
     client_data = project_data.get('client', {})
+    account_data = project_data.get('account', {})
     appraisal_items = project_data.get('appraisal_items', [])
+    did_inspect = project_data.get('did_inspect')
+    inspection_placeholders = _get_inspection_placeholders(did_inspect)
     
     # Log the field name we're looking for
     logger.info(f"Looking for field value: {field_name}")
@@ -1503,6 +1632,11 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
         logger.info(f"Found {field_name} in client_data: {client_data[field_name]}")
         return client_data[field_name]
     
+    # Check if the field is in account_data
+    if field_name in account_data:
+        logger.info(f"Found {field_name} in account_data: {account_data[field_name]}")
+        return account_data[field_name]
+    
     # Build full address
     full_address = f"{client_data.get('address', '')} {client_data.get('city', '')} {client_data.get('state', '')} {client_data.get('zip_code', '')}".strip()
     
@@ -1516,6 +1650,9 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
         'current_date': datetime.now().strftime('%B %d, %Y'),
         'inspection_date': _format_date(project_data.get('inspection_date', datetime.now().strftime('%Y-%m-%d'))),
         'report_date': _format_date(project_data.get('report_date', datetime.now().strftime('%Y-%m-%d'))),
+        'effective_date': _format_date(project_data.get('effective_date', '')),
+        'appraisal_location': project_data.get('appraisal_location', ''),
+        'appraisal_type': project_data.get('appraisal_type', ''),
         'address': full_address,
         'death_date': _format_date(client_data.get('date_of_death')),
         'total_value': f"${project_data.get('total_value', '0.00')}",
@@ -1532,7 +1669,14 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
         'attorney_name': client_data.get('attorney_name', ''),
         'attorney_phone': client_data.get('attorney_phone', ''),
         'attorney_email': client_data.get('attorney_email', ''),
-        'case_name': client_data.get('case_name', 'Estate Appraisal'),
+        'case_name': client_data.get('case_name', 'Appraisal'),
+        'estate_of': client_data.get('name', ''),
+        
+        # Account fields
+            'law_firm': account_data.get('name', ''),  # law_firm uses name from account table
+        
+        # Inspection fields
+        **inspection_placeholders,
         
         # Appraisal summary fields
         'item_count': str(len(appraisal_items)),
@@ -1906,6 +2050,80 @@ def _is_valid_image(image_path: str) -> bool:
 
 # ==================== TABLE RENDERING FUNCTIONS ====================
 
+def _parse_description_for_coin_wine(description: str, item_type: str) -> tuple:
+    """Parse description template to extract quantity and price for Coin/Wine items"""
+    import re
+    
+    quantity = 0
+    price = 0
+    
+    if not description:
+        return (quantity, price)
+    
+    is_coin = item_type.lower() in ['coin', 'coins']
+    is_wine = item_type.lower() in ['wine', 'wines']
+    
+    try:
+        if is_coin:
+            # Parse: "Quantity: X" and "Value Per Coin $: Y"
+            quantity_match = re.search(r'Quantity:\s*(\d+(?:\.\d+)?)', description, re.IGNORECASE)
+            price_match = re.search(r'Value Per Coin \$:\s*(\d+(?:\.\d+)?)', description, re.IGNORECASE)
+            
+            if quantity_match:
+                quantity = float(quantity_match.group(1))
+            if price_match:
+                price = float(price_match.group(1))
+                
+        elif is_wine:
+            # Parse: "Quantity: X" and "Per Bottle Price: Y"
+            quantity_match = re.search(r'Quantity:\s*(\d+(?:\.\d+)?)', description, re.IGNORECASE)
+            price_match = re.search(r'Per Bottle Price:\s*(\d+(?:\.\d+)?)', description, re.IGNORECASE)
+            
+            if quantity_match:
+                quantity = float(quantity_match.group(1))
+            if price_match:
+                price = float(price_match.group(1))
+    
+    except Exception as e:
+        logger.error(f"Error parsing description: {str(e)}")
+    
+    return (quantity, price)
+
+def _add_images_after_table(doc: Document, items: list, insert_index: int, parent):
+    """Add images from items after the table"""
+    import os
+    logger.info(f"🖼️ Adding images after table for {len(items)} items")
+    
+    current_insert_index = insert_index
+    images_added = 0
+    
+    for item in items:
+        photo_path = item.get('photo_path')
+        if photo_path and os.path.exists(photo_path):
+            try:
+                # Create a new paragraph for the image
+                img_paragraph = doc.add_paragraph()
+                img_run = img_paragraph.add_run()
+                
+                # Add the image with a reasonable size
+                img_run.add_picture(photo_path, width=Inches(3), height=Inches(3))
+                
+                # Get the paragraph element and insert it at the correct position
+                img_p_element = img_paragraph._element
+                doc._body._element.remove(img_p_element)  # Remove from end
+                parent.insert(current_insert_index, img_p_element)  # Insert at position
+                
+                images_added += 1
+                current_insert_index += 1
+                logger.info(f"✅ Added image: {os.path.basename(photo_path)}")
+            except Exception as e:
+                logger.error(f"❌ Failed to add image {photo_path}: {str(e)}")
+        else:
+            logger.debug(f"⏭️ No photo or file not found for item")
+    
+    logger.info(f"✅ Added {images_added} images after table")
+    return images_added
+
 def _handle_coin_table(doc: Document, project_data: Dict):
     """Handle coin collection table rendering - uses JSONB attributes"""
     from docx.shared import Pt
@@ -1916,9 +2134,9 @@ def _handle_coin_table(doc: Document, project_data: Dict):
     # Get coin items from appraisal_items with type='coin'
     appraisal_items = project_data.get('appraisal_items', [])
     coin_items = [
-        item.get('attributes', {})
+        item
         for item in appraisal_items
-        if item.get('item_type') in ['coin', 'coins']
+        if item.get('item_type') in ['Coins', 'coins', 'Coin', 'coin']
     ]
     
     if not coin_items:
@@ -1971,15 +2189,24 @@ def _handle_coin_table(doc: Document, project_data: Dict):
         for coin in coin_items:
             row_cells = new_table.add_row().cells
             
-            row_cells[0].text = str(coin.get('quantity', ''))
-            row_cells[1].text = str(coin.get('year', ''))
-            row_cells[2].text = str(coin.get('coin_name', ''))
-            row_cells[3].text = str(coin.get('condition', ''))
+            # Parse description to extract quantity and price
+            description = coin.get('description', '')
+            quantity, price_per_coin = _parse_description_for_coin_wine(description, 'coins')
             
-            # Format price
-            price = coin.get('appraised_price', 0)
+            # Extract other fields from description using regex
+            year_match = re.search(r'Year:\s*([^\n]+)', description)
+            condition_match = re.search(r'Condition:\s*([^\n]+)', description)
+            coin_desc_match = re.search(r'Coin Description:\s*([^\n]+)', description)
+            
+            row_cells[0].text = str(int(quantity)) if quantity else '0'
+            row_cells[1].text = year_match.group(1).strip() if year_match else ''
+            row_cells[2].text = coin_desc_match.group(1).strip() if coin_desc_match else description.split('\n')[0][:50]
+            row_cells[3].text = condition_match.group(1).strip() if condition_match else ''
+            
+            # Auto-calculate and format price (quantity * price_per_coin)
+            total_value = quantity * price_per_coin
             try:
-                row_cells[4].text = f"${float(price):,.2f}"
+                row_cells[4].text = f"${total_value:,.2f}"
             except:
                 row_cells[4].text = "$0.00"
             
@@ -2000,15 +2227,21 @@ def _handle_coin_table(doc: Document, project_data: Dict):
         parent.remove(tbl_element)  # Remove old template table
         logger.info("✅ Removed old template table")
         
-        # Add page break after data table
+        # Add images after the table
+        _add_images_after_table(doc, coin_items, tbl_index + 1, parent)
+        
+        # Add page break after images (page break will be added after all images)
+        # Count how many elements (paragraphs) were added for images
+        images_added = len([item for item in coin_items if item.get('photo_path')])
+        
         break_after_data = OxmlElement('w:p')
         break_run_after_data = OxmlElement('w:r')
         break_element_after_data = OxmlElement('w:br')
         break_element_after_data.set(qn('w:type'), 'page')
         break_run_after_data.append(break_element_after_data)
         break_after_data.append(break_run_after_data)
-        parent.insert(tbl_index + 1, break_after_data)
-        logger.info("✅ Added page break after coin data table")
+        parent.insert(tbl_index + 1 + images_added, break_after_data)
+        logger.info("✅ Added page break after coin data table and images")
         
         # Add summary table after data table
         _add_summary_table(doc, coin_items, 'coin', project_data)
@@ -2132,9 +2365,9 @@ def _handle_wine_table(doc: Document, project_data: Dict):
     # Get wine items from appraisal_items with type='wine'
     appraisal_items = project_data.get('appraisal_items', [])
     wine_items = [
-        item.get('attributes', {})
+        item
         for item in appraisal_items
-        if item.get('item_type') in ['wine', 'wines']
+        if item.get('item_type') in ['Wine', 'wine', 'Wines', 'wines']
     ]
     
     if not wine_items:
@@ -2186,19 +2419,26 @@ def _handle_wine_table(doc: Document, project_data: Dict):
         for wine in wine_items:
             row_cells = new_table.add_row().cells
             
-            row_cells[0].text = str(wine.get('quantity', ''))
-            row_cells[1].text = str(wine.get('bottle_description', ''))
+            # Parse description to extract quantity and price
+            description = wine.get('description', '')
+            quantity, price_per_bottle = _parse_description_for_coin_wine(description, 'wine')
+            
+            # Extract bottle description from template
+            bottle_desc_match = re.search(r'Bottle Description:\s*([^\n]+)', description)
+            
+            row_cells[0].text = str(int(quantity)) if quantity else '0'
+            row_cells[1].text = bottle_desc_match.group(1).strip() if bottle_desc_match else description.split('\n')[0][:50]
             
             # Format prices
             try:
-                per_bottle = float(wine.get('per_bottle_price', 0))
-                row_cells[2].text = f"${per_bottle:,.2f}"
+                row_cells[2].text = f"${price_per_bottle:,.2f}"
             except:
                 row_cells[2].text = "$0.00"
             
+            # Auto-calculate and format total price (quantity * price_per_bottle)
+            total_value = quantity * price_per_bottle
             try:
-                total = float(wine.get('total_price', 0))
-                row_cells[3].text = f"${total:,.2f}"
+                row_cells[3].text = f"${total_value:,.2f}"
             except:
                 row_cells[3].text = "$0.00"
             
@@ -2219,15 +2459,21 @@ def _handle_wine_table(doc: Document, project_data: Dict):
         parent.remove(tbl_element)  # Remove old template table
         logger.info("✅ Removed old template table")
         
-        # Add page break after data table
+        # Add images after the table
+        _add_images_after_table(doc, wine_items, tbl_index + 1, parent)
+        
+        # Add page break after images (page break will be added after all images)
+        # Count how many elements (paragraphs) were added for images
+        images_added = len([item for item in wine_items if item.get('photo_path')])
+        
         break_after_data = OxmlElement('w:p')
         break_run_after_data = OxmlElement('w:r')
         break_element_after_data = OxmlElement('w:br')
         break_element_after_data.set(qn('w:type'), 'page')
         break_run_after_data.append(break_element_after_data)
         break_after_data.append(break_run_after_data)
-        parent.insert(tbl_index + 1, break_after_data)
-        logger.info("✅ Added page break after wine data table")
+        parent.insert(tbl_index + 1 + images_added, break_after_data)
+        logger.info("✅ Added page break after wine data table and images")
         
         # Add summary table after data table
         _add_summary_table(doc, wine_items, 'wine', project_data)
@@ -2239,7 +2485,7 @@ def _handle_wine_table(doc: Document, project_data: Dict):
 def _add_summary_table(doc: Document, items: list, item_type: str, project_data: Dict):
     """Find summary section and replace its table with project summary data"""
     from docx.enum.text import WD_BREAK, WD_ALIGN_PARAGRAPH
-    from datetime import datetime
+    
     
     logger.info(f"📊 Searching for summary table to replace for {item_type}")
     
