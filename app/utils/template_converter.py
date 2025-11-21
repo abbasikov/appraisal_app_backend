@@ -1862,23 +1862,24 @@ def _cleanup_content_between_images_and_summary(doc: Document, last_item_index: 
                     
                     logger.info(f"Removed {len(elements_to_remove)} elements between items and summary")
                 
-                # Add page break before summary to isolate it on its own page
-                # This ensures the summary starts on a new page
-                page_break_before = doc.add_paragraph()._element
-                parent.remove(page_break_before)
-                parent.insert(summary_element_index, page_break_before)
-                
-                # Find and configure page break paragraph
-                for p in doc.paragraphs:
-                    if p._element == page_break_before:
-                        run = p.add_run()
-                        run.add_break(WD_BREAK.PAGE)
-                        break
-                
-                logger.info("Added page break before summary section")
-                
-                # For estate appraisal templates, use a different approach to center the summary on the page
+                # For estate appraisal templates, add a page break so the summary
+                # starts on its own page, and then center it using a special table.
                 if is_estate_template:
+                    # Add page break before summary to isolate it on its own page
+                    page_break_before = doc.add_paragraph()._element
+                    parent.remove(page_break_before)
+                    parent.insert(summary_element_index, page_break_before)
+                    
+                    # Find and configure page break paragraph
+                    for p in doc.paragraphs:
+                        if p._element == page_break_before:
+                            run = p.add_run()
+                            run.add_break(WD_BREAK.PAGE)
+                            break
+                    
+                    logger.info("Added page break before summary section (estate template)")
+                    
+                    # Use a different approach to center the summary on the page
                     try:
                         # Create a table with 3 rows to position the summary in the middle row
                         # This is a more reliable way to center content vertically on a page
@@ -1989,8 +1990,8 @@ def _cleanup_content_between_images_and_summary(doc: Document, last_item_index: 
                             logger.warning(f"Could not center-align paragraph: {str(e)}")
                     logger.info(f"Center-aligned {len(summary_paragraphs_list)} paragraphs in summary section")
                 
-                # If we found the end of summary, add page break after it
-                if end_of_summary:
+                # If we found the end of summary, add page break after it only for estate templates
+                if end_of_summary and is_estate_template:
                     # Add page break after summary to start next content on a new page
                     page_break_after = doc.add_paragraph()._element
                     parent.remove(page_break_after)
@@ -2003,7 +2004,7 @@ def _cleanup_content_between_images_and_summary(doc: Document, last_item_index: 
                             run.add_break(WD_BREAK.PAGE)
                             break
                     
-                    logger.info("Added page break after summary section")
+                    logger.info("Added page break after summary section (estate template)")
             
     except Exception as e:
         logger.error(f"Error during content cleanup: {str(e)}")
@@ -2315,39 +2316,38 @@ def _handle_coin_table(doc: Document, project_data: Dict):
         logger.warning("⚠️ No table found in document to replace")
 
 def _handle_content_table(doc: Document, project_data: Dict):
-    """Handle content/inventory table rendering - uses JSONB attributes"""
+    """Handle content/inventory table rendering with room-by-room numbered layout."""
     from docx.shared import Pt
-    from docx.enum.text import WD_BREAK
-    
-    logger.info("📦 Rendering content inventory table from JSONB attributes")
-    
-    # Get content items from appraisal_items with type='content'
+
+    logger.info("📦 Rendering content inventory table from JSONB attributes (room-by-room)")
+
+    # Get full content items (preserve item metadata like photos)
     appraisal_items = project_data.get('appraisal_items', [])
-    content_items = [
-        item.get('attributes', {})
-        for item in appraisal_items
-        if item.get('item_type') in ['content', 'contents', 'inventory']
-    ]
-    
+    content_items = []
+    for item in appraisal_items:
+        item_type = (item.get('item_type') or '').lower()
+        if item_type in ['content', 'contents', 'inventory']:
+            content_items.append(item)
+
     if not content_items:
         logger.warning("No content items found for content table")
         return
-    
+
     # Find the first table in the document and replace it
     if len(doc.tables) > 0:
         logger.info(f"📋 Found {len(doc.tables)} table(s) in document, replacing first one with content data")
         old_table = doc.tables[0]
-        
+
         # Get the parent element and position
         tbl_element = old_table._element
         parent = tbl_element.getparent()
         tbl_index = list(parent).index(tbl_element)
         logger.info(f"📍 Old table position: index {tbl_index}")
-        
+
         # Create new table (will be added at end of document initially)
-        logger.info("🔨 Creating new content table...")
-        new_table = doc.add_table(rows=1, cols=2)
-        
+        logger.info("🔨 Creating new content table (room-by-room numbered layout)...")
+        new_table = doc.add_table(rows=1, cols=3)
+
         # Try to apply a style, fall back to Table Grid if not available
         try:
             new_table.style = 'Light Grid Accent 1'
@@ -2356,68 +2356,359 @@ def _handle_content_table(doc: Document, project_data: Dict):
                 new_table.style = 'Table Grid'
             except KeyError:
                 pass  # Use default table style
-        
-        # Header row
-        header_cells = new_table.rows[0].cells
-        header_cells[0].text = "Area"
-        header_cells[1].text = "Fair Market Value (FMV)"
-        
-        # Make headers bold (no color)
-        for cell in header_cells:
-            # Set cell height for header row
-            cell.height = Pt(25)
-            for para in cell.paragraphs:
-                for run in para.runs:
-                    run.font.bold = True
-                    run.font.size = Pt(14)
-        
-        # Data rows
-        logger.info(f"📝 Adding {len(content_items)} content items to table")
-        for content in content_items:
-            row_cells = new_table.add_row().cells
-            
-            row_cells[0].text = str(content.get('area', ''))
-            
-            # Format FMV
-            fmv = content.get('fair_market_value', 0)
+
+        # We'll reuse the first row as the first AREA header when we encounter
+        # the first area. Subsequent areas will add their own header rows.
+        first_row = new_table.rows[0]
+        first_row_is_used = False
+
+        line_mappings = []  # Track mapping of line number -> item (for photos & summary)
+        line_number = 1
+
+        # Enrich items with area/description/fmv and sort by area so that
+        # all items for the same room appear together under a single header.
+        enriched_items = []
+        for index, item in enumerate(content_items):
+            attributes = item.get('attributes', {}) or {}
+
+            # Prefer the short JSON description field for contents
+            short_desc = (attributes.get('description') or '').strip()
+            if not short_desc:
+                # Fallback: try to parse the first 'Description:' line from item.description
+                full_desc = item.get('description') or ''
+                parsed_desc = ''
+                has_description_label = False
+                for line in full_desc.splitlines():
+                    stripped = line.strip()
+                    if stripped.lower().startswith('description:'):
+                        has_description_label = True
+                        parsed_desc = stripped.split(':', 1)[1].strip()
+                        break
+
+                if parsed_desc:
+                    # User entered a short description after 'Description:'
+                    short_desc = parsed_desc
+                elif has_description_label:
+                    # Template-style block with empty Description: should render as blank
+                    short_desc = ''
+                else:
+                    # Non-template free-text description
+                    short_desc = full_desc
+
+            # Try multiple possible keys for area/room
+            area = (
+                attributes.get('area')
+                or attributes.get('room')
+                or item.get('room_area')
+                or ''
+            )
+
+            # Compute value (FMV) for this item
+            fmv_raw = attributes.get('fair_market_value', item.get('appraised_value'))
             try:
-                row_cells[1].text = f"${float(fmv):,.2f}"
-            except:
-                row_cells[1].text = "$0.00"
-            
-            # Format cells
-            for cell in row_cells:
+                fmv = float(fmv_raw) if fmv_raw not in [None, ''] else None
+            except Exception:
+                fmv = None
+
+            enriched_items.append({
+                'item': item,
+                'attributes': attributes,
+                'area': area,
+                'description': short_desc,
+                'fmv': fmv,
+                'index': index,
+            })
+
+        # Group by area by sorting; this ensures repeated areas (e.g. BALCONY)
+        # are kept together even if items were interleaved originally.
+        enriched_items.sort(key=lambda e: ((e['area'] or '').upper(), e['index']))
+
+        current_area = None
+        for entry in enriched_items:
+            item = entry['item']
+            attributes = entry['attributes']
+            area = entry['area']
+            description = entry['description']
+            fmv = entry['fmv']
+
+            # Start a new AREA block when the area changes
+            if area != current_area:
+                if current_area is not None:
+                    # Add a blank spacer row between areas for visual separation
+                    spacer_row = new_table.add_row()
+                    for cell in spacer_row.cells:
+                        for para in cell.paragraphs:
+                            for run in para.runs:
+                                run.font.size = Pt(10)
+
+                current_area = area
+
+                # Create or reuse the header row for this area
+                if not first_row_is_used:
+                    header_row = first_row
+                    first_row_is_used = True
+                else:
+                    header_row = new_table.add_row()
+
+                header_cells = header_row.cells
+                header_cells[0].text = f"AREA: {area}" if area else "AREA:"
+                # Merge other cells into the first one so the heading spans the row
+                header_cells[0].merge(header_cells[1])
+                header_cells[0].merge(header_cells[2])
+
+                for para in header_cells[0].paragraphs:
+                    for run in para.runs:
+                        run.font.bold = True
+                        run.font.size = Pt(12)
+
+            # Add a numbered row for this content item
+            row = new_table.add_row()
+            cells = row.cells
+            cells[0].text = f"{line_number}."
+            cells[1].text = description
+            cells[2].text = f"${fmv:,.2f}" if isinstance(fmv, (int, float)) else ''
+
+            for cell in cells:
                 for para in cell.paragraphs:
                     for run in para.runs:
-                        run.font.size = Pt(14)
-        
-        logger.info("🔄 Moving new table to replace old table...")
-        
+                        run.font.size = Pt(12)
+
+            line_mappings.append({
+                'line_number': line_number,
+                'item': item,
+                'area': current_area,
+                'attributes': attributes,
+            })
+            line_number += 1
+
+        logger.info("🔄 Moving new content table to replace old table...")
+
         # Move new table to correct position and remove old table (no page break)
         new_tbl_element = new_table._element
         doc._body._element.remove(new_tbl_element)  # Remove from end
         parent.insert(tbl_index, new_tbl_element)  # Insert at same position
-        logger.info("✅ Inserted new table at correct position")
-        
+        logger.info("✅ Inserted new content table at correct position")
+
         parent.remove(tbl_element)  # Remove old template table
-        logger.info("✅ Removed old template table")
-        
-        # Add page break after data table
-        break_after_data = OxmlElement('w:p')
-        break_run_after_data = OxmlElement('w:r')
-        break_element_after_data = OxmlElement('w:br')
-        break_element_after_data.set(qn('w:type'), 'page')
-        break_run_after_data.append(break_element_after_data)
-        break_after_data.append(break_run_after_data)
-        parent.insert(tbl_index + 1, break_after_data)
-        logger.info("✅ Added page break after content data table")
-        
-        # Add summary table after data table
-        _add_summary_table(doc, content_items, 'content', project_data)
-        
-        logger.info(f"✅ Content table replaced with {len(content_items)} items from JSONB attributes")
+        logger.info("✅ Removed old template content table")
+
+        # Add "PHOTOS OF CONTENTS" section with images and line numbers
+        _add_content_photos_after_table(doc, line_mappings, new_tbl_element, parent)
+
+        # Add room-by-room summary table (AREA/ROOM + TOTAL FMV + grand total)
+        _add_content_summary_table(doc, line_mappings)
+
+        logger.info(f"✅ Content table, photos, and summary generated for {len(line_mappings)} items")
     else:
-        logger.warning("⚠️ No table found in document to replace")
+        logger.warning("⚠️ No table found in document to replace for content template")
+
+def _add_content_photos_after_table(doc: Document, line_mappings: list, tbl_element, parent):
+    """Insert PHOTOS OF CONTENTS section after the content table.
+
+    Each photo is labeled by its line number so that image 1 corresponds to
+    line 1 in the content table, etc.
+    """
+
+    logger.info(f"🖼️ Adding photos of contents for {len(line_mappings)} items")
+
+    try:
+        tbl_index = list(parent).index(tbl_element)
+
+        # Add a page break after the table so photos start on a new page
+        page_break_p = OxmlElement('w:p')
+        br_run = OxmlElement('w:r')
+        br = OxmlElement('w:br')
+        br.set(qn('w:type'), 'page')
+        br_run.append(br)
+        page_break_p.append(br_run)
+        parent.insert(tbl_index + 1, page_break_p)
+
+        current_insert_index = tbl_index + 2
+
+        # Add heading: PHOTOS OF CONTENTS
+        heading_para = doc.add_paragraph()
+        heading_run = heading_para.add_run("PHOTOS OF CONTENTS")
+        heading_run.bold = True
+        heading_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+        heading_element = heading_para._element
+        body = heading_element.getparent()
+        if body is not None:
+            body.remove(heading_element)
+        parent.insert(current_insert_index, heading_element)
+        current_insert_index += 1
+
+        # Add one paragraph per item: "N.    <photo>" (extra spacing before image)
+        for mapping in line_mappings:
+            line_number = mapping['line_number']
+            item = mapping['item']
+            photo_path = item.get('photo_path')
+            logger.info(f"   → Line {line_number}: photo_path={photo_path}")
+
+            para = doc.add_paragraph()
+            num_run = para.add_run(f"{line_number}. ")
+            num_run.bold = True
+
+            # Add a bit of extra horizontal spacing before the image
+            para.add_run("   ")
+
+            if photo_path and os.path.exists(photo_path) and _is_valid_image(photo_path):
+                try:
+                    img_run = para.add_run()
+                    img_run.add_picture(photo_path, width=Inches(2), height=Inches(2))
+                except Exception as e:
+                    logger.error(f"❌ Failed to add content photo for line {line_number}: {str(e)}")
+            else:
+                if photo_path:
+                    logger.warning(f"⚠️ Content photo file does not exist or is invalid for line {line_number}: {photo_path}")
+
+            para_element = para._element
+            body = para_element.getparent()
+            if body is not None:
+                body.remove(para_element)
+            parent.insert(current_insert_index, para_element)
+            current_insert_index += 1
+
+        logger.info("✅ PHOTOS OF CONTENTS section added")
+    except Exception as e:
+        logger.error(f"Error while adding PHOTOS OF CONTENTS section: {str(e)}")
+
+
+def _add_content_summary_table(doc: Document, line_mappings: list):
+    """Add a room-by-room SUMMARY table for content templates.
+
+    The summary lists AREA/ROOM and TOTAL FMV per area, followed by a TOTAL row.
+    Only the summary table is replaced; the existing SUMMARY heading is preserved.
+    """
+
+    from collections import OrderedDict
+    from docx.shared import Pt
+
+    logger.info("📊 Building room-by-room SUMMARY table for contents")
+
+    # Aggregate FMV per area/room, skipping rows with empty/zero totals
+    room_totals = OrderedDict()
+    grand_total = 0.0
+
+    for mapping in line_mappings:
+        item = mapping['item']
+        attributes = mapping.get('attributes') or item.get('attributes', {}) or {}
+        area = (
+            mapping.get('area')
+            or attributes.get('area')
+            or attributes.get('room')
+            or item.get('room_area')
+            or ''
+        )
+        fmv_raw = attributes.get('fair_market_value', item.get('appraised_value', 0))
+        try:
+            fmv = float(fmv_raw or 0)
+        except Exception:
+            fmv = 0.0
+
+        # Skip items with no value; they should not create summary rows
+        if fmv <= 0:
+            continue
+
+        if area not in room_totals:
+            room_totals[area] = 0.0
+        room_totals[area] += fmv
+        grand_total += fmv
+
+    # Locate the existing SUMMARY table (paragraph containing 'summary' + following table)
+    summary_paragraph = None
+    summary_table_to_replace = None
+    parent = None
+
+    for idx, paragraph in enumerate(doc.paragraphs):
+        if 'summary' in paragraph.text.lower():
+            temp_parent = paragraph._element.getparent()
+            para_element = paragraph._element
+            para_position = list(temp_parent).index(para_element)
+
+            tables_found = []
+            for i in range(para_position + 1, min(para_position + 50, len(list(temp_parent)))):
+                element = list(temp_parent)[i]
+                if element.tag.endswith('}tbl'):
+                    for tbl in doc.tables:
+                        if tbl._element == element:
+                            tables_found.append(tbl)
+                            break
+                    if tables_found:
+                        break
+
+            if tables_found:
+                summary_paragraph = paragraph
+                parent = temp_parent
+                logger.info(f"✅ Found content SUMMARY section with table at paragraph {idx}: '{paragraph.text.strip()}'")
+                if len(tables_found) > 1:
+                    summary_table_to_replace = tables_found[-1]
+                else:
+                    summary_table_to_replace = tables_found[0]
+                break
+
+    if not summary_paragraph or not summary_table_to_replace:
+        logger.warning("⚠️ No SUMMARY section with table found for contents, skipping summary replacement")
+        return
+
+    tbl_element = summary_table_to_replace._element
+    tbl_index = list(parent).index(tbl_element)
+
+    # Create new SUMMARY table: AREA/ROOM | TOTAL FMV
+    rows_needed = len(room_totals) + 1  # +1 for TOTAL row
+    new_summary_table = doc.add_table(rows=1 + rows_needed, cols=2)
+
+    try:
+        new_summary_table.style = 'Table Grid'
+    except KeyError:
+        pass
+
+    # Header row
+    header_cells = new_summary_table.rows[0].cells
+    header_cells[0].text = "AREA/ROOM"
+    header_cells[1].text = "TOTAL FMV"
+
+    for cell in header_cells:
+        cell.height = Pt(25)
+        for para in cell.paragraphs:
+            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for run in para.runs:
+                run.font.bold = True
+                run.font.size = Pt(14)
+
+    # Area rows
+    row_idx = 1
+    for area, total in room_totals.items():
+        row_cells = new_summary_table.rows[row_idx].cells
+        row_cells[0].text = area or ''
+        row_cells[1].text = f"${total:,.2f}" if total else "$0.00"
+        for cell in row_cells:
+            for para in cell.paragraphs:
+                para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                for run in para.runs:
+                    run.font.size = Pt(12)
+        row_idx += 1
+
+    # TOTAL row
+    total_row_cells = new_summary_table.rows[row_idx].cells
+    total_row_cells[0].text = "TOTAL"
+    total_row_cells[1].text = f"${grand_total:,.2f}" if grand_total else "$0.00"
+    for cell in total_row_cells:
+        for para in cell.paragraphs:
+            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            for run in para.runs:
+                run.font.bold = True
+                run.font.size = Pt(12)
+
+    new_summary_table.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # Replace the existing summary table IN PLACE (do not touch the heading)
+    new_tbl_element = new_summary_table._element
+    doc._body._element.remove(new_tbl_element)
+    parent.insert(tbl_index, new_tbl_element)
+    parent.remove(tbl_element)
+
+    logger.info("✅ Replaced content SUMMARY table (heading preserved)")
 
 def _handle_wine_table(doc: Document, project_data: Dict):
     """Handle wine collection table rendering - uses JSONB attributes"""
@@ -2597,119 +2888,119 @@ def _add_summary_table(doc: Document, items: list, item_type: str, project_data:
     if not summary_paragraph or not summary_table_to_replace:
         logger.warning("⚠️ No summary section with table found, skipping replacement")
         return
-    
-    # Get table position
+    # Get table and summary paragraph positions
     tbl_element = summary_table_to_replace._element
     tbl_index = list(parent).index(tbl_element)
-    
-    # Get summary paragraph position
     summary_para_element = summary_paragraph._element
     summary_para_index = list(parent).index(summary_para_element)
-    page_break_before_summary = OxmlElement('w:p')
-    page_break_run = OxmlElement('w:r')
-    page_break_el = OxmlElement('w:br')
-    page_break_el.set(qn('w:type'), 'page')
-    page_break_run.append(page_break_el)
-    page_break_before_summary.append(page_break_run)
-    parent.insert(tbl_index, page_break_before_summary)
-    logger.info("✅ Added page break BEFORE SUMMARY heading")
-    # Step 1: Remove the existing summary text paragraph and ALL content between it and the table
-    # parent.remove(summary_para_element)
-    # logger.info("✅ Removed existing summary text")
-    
-    # Aggressively remove ALL elements between the old summary position and the table
-    # This ensures we clean up any page breaks, empty paragraphs, whitespace, or other elements
-    elements_removed = 0
-    max_cleanup = 50  # Increased safety limit to handle more elements
-    cleanup_count = 0
-    
-    while summary_para_index < len(list(parent)) and cleanup_count < max_cleanup:
-        next_element = list(parent)[summary_para_index]
-        
-        # Stop if we've reached the table
-        if next_element == tbl_element:
-            logger.info("✅ Reached the table, stopping cleanup")
-            break
-        
-        # Check if this element should be removed
-        should_remove = False
-        
-        if next_element.tag.endswith('}p'):  # Paragraph
-            # Get all text from the paragraph and its children
-            full_text = ''.join(next_element.itertext()) if hasattr(next_element, 'itertext') else ''
-            
-            # Remove if:
-            # 1. It's completely empty
-            # 2. It only contains whitespace (spaces, tabs, newlines, etc.)
-            # 3. It contains a page break
-            # 4. It has no text content (just formatting)
-            if not full_text or not full_text.strip() or full_text.isspace():
-                should_remove = True
-                logger.info(f"   → Removing empty/whitespace paragraph")
-            else:
-                # Check for page break in children
-                for child in next_element.iter():
-                    if 'br' in str(child.tag).lower() or 'break' in str(child.tag).lower():
-                        should_remove = True
-                        logger.info(f"   → Removing paragraph with page break")
-                        break
-        
-        if should_remove:
-            parent.remove(next_element)
-            elements_removed += 1
-            cleanup_count += 1
-        else:
-            # If we encounter actual content, stop cleaning
-            logger.info(f"   → Found content paragraph, stopping cleanup")
-            break
-    
-    if elements_removed > 0:
-        logger.info(f"✅ Cleaned up {elements_removed} element(s) between old summary and table")
-    
-    # Recalculate table index after removing summary paragraph and cleanup
-    tbl_index = list(parent).index(tbl_element)
-    
-    # Step 1.5: Aggressively clean up ALL empty paragraphs immediately before the table
-    # This ensures there are no extra spaces before the summary heading
-    extra_elements_removed = 0
-    max_extra_cleanup = 50  # Safety limit
-    extra_cleanup_count = 0
-    
-    # Work backwards from just before the table position
-    check_index = tbl_index - 1
-    while check_index >= 0 and extra_cleanup_count < max_extra_cleanup:
-        if check_index < len(list(parent)):
-            element = list(parent)[check_index]
-            
-            should_remove_extra = False
-            if element.tag.endswith('}p'):  # Paragraph
-                full_text = ''.join(element.itertext()) if hasattr(element, 'itertext') else ''
-                
-                # Remove if empty or whitespace only
-                if not full_text or not full_text.strip() or full_text.isspace():
-                    should_remove_extra = True
-                    logger.info(f"   → Extra cleanup: Removing empty/whitespace paragraph before summary heading")
-            
-            if should_remove_extra:
-                parent.remove(element)
-                extra_elements_removed += 1
-                extra_cleanup_count += 1
-                # Recalculate indices after removal
-                tbl_index = list(parent).index(tbl_element)
-                check_index = tbl_index - 1  # Reset to check again from table position
-            else:
-                # Found content or non-paragraph element, stop cleaning
-                logger.info(f"   → Found content before table, stopping extra cleanup")
-                break
-        else:
-            break
-    
-    if extra_elements_removed > 0:
-        logger.info(f"✅ Extra cleanup removed {extra_elements_removed} empty element(s) before summary heading position")
 
-    
-    # Final recalculation of table index before inserting heading
-    tbl_index = list(parent).index(tbl_element)
+    is_image_based = (item_type == 'image_based')
+
+    # For coin/wine/content we keep the aggressive cleanup and page break before summary.
+    # For image_based templates, we preserve the original summary paragraph and layout
+    # (cleanup between items and summary is already handled elsewhere).
+    if not is_image_based:
+        # page_break_before_summary = OxmlElement('w:p')
+        # page_break_run = OxmlElement('w:r')
+        # page_break_el = OxmlElement('w:br')
+        # page_break_el.set(qn('w:type'), 'page')
+        # page_break_run.append(page_break_el)
+        # page_break_before_summary.append(page_break_run)
+        # parent.insert(tbl_index, page_break_before_summary)
+        # logger.info("✅ Added page break BEFORE SUMMARY heading")
+
+        # Aggressively remove ALL elements between the old summary position and the table
+        # This ensures we clean up any page breaks, empty paragraphs, whitespace, or other elements
+        elements_removed = 0
+        max_cleanup = 50  # Increased safety limit to handle more elements
+        cleanup_count = 0
+
+        while summary_para_index < len(list(parent)) and cleanup_count < max_cleanup:
+            next_element = list(parent)[summary_para_index]
+
+            # Stop if we've reached the table
+            if next_element == tbl_element:
+                logger.info("✅ Reached the table, stopping cleanup")
+                break
+
+            # Check if this element should be removed
+            should_remove = False
+
+            if next_element.tag.endswith('}p'):  # Paragraph
+                # Get all text from the paragraph and its children
+                full_text = ''.join(next_element.itertext()) if hasattr(next_element, 'itertext') else ''
+
+                # Remove if:
+                # 1. It's completely empty
+                # 2. It only contains whitespace (spaces, tabs, newlines, etc.)
+                # 3. It contains a page break
+                # 4. It has no text content (just formatting)
+                if not full_text or not full_text.strip() or full_text.isspace():
+                    should_remove = True
+                    logger.info(f"   → Removing empty/whitespace paragraph")
+                else:
+                    # Check for page break in children
+                    for child in next_element.iter():
+                        if 'br' in str(child.tag).lower() or 'break' in str(child.tag).lower():
+                            should_remove = True
+                            logger.info(f"   → Removing paragraph with page break")
+                            break
+
+            if should_remove:
+                parent.remove(next_element)
+                elements_removed += 1
+                cleanup_count += 1
+            else:
+                # If we encounter actual content, stop cleaning
+                logger.info(f"   → Found content paragraph, stopping cleanup")
+                break
+
+        if elements_removed > 0:
+            logger.info(f"✅ Cleaned up {elements_removed} element(s) between old summary and table")
+
+        # Recalculate table index after cleanup
+        tbl_index = list(parent).index(tbl_element)
+
+        # Step 1.5: Aggressively clean up ALL empty paragraphs immediately before the table
+        # This ensures there are no extra spaces before the summary heading
+        extra_elements_removed = 0
+        max_extra_cleanup = 50  # Safety limit
+        extra_cleanup_count = 0
+
+        # Work backwards from just before the table position
+        check_index = tbl_index - 1
+        while check_index >= 0 and extra_cleanup_count < max_extra_cleanup:
+            if check_index < len(list(parent)):
+                element = list(parent)[check_index]
+
+                should_remove_extra = False
+                if element.tag.endswith('}p'):  # Paragraph
+                    full_text = ''.join(element.itertext()) if hasattr(element, 'itertext') else ''
+
+                    # Remove if empty or whitespace only
+                    if not full_text or not full_text.strip() or full_text.isspace():
+                        should_remove_extra = True
+                        logger.info(f"   → Extra cleanup: Removing empty/whitespace paragraph before summary heading")
+
+                if should_remove_extra:
+                    parent.remove(element)
+                    extra_elements_removed += 1
+                    extra_cleanup_count += 1
+                    # Recalculate indices after removal
+                    tbl_index = list(parent).index(tbl_element)
+                    check_index = tbl_index - 1  # Reset to check again from table position
+                else:
+                    # Found content or non-paragraph element, stop cleaning
+                    logger.info(f"   → Found content before table, stopping extra cleanup")
+                    break
+            else:
+                break
+
+        if extra_elements_removed > 0:
+            logger.info(f"✅ Extra cleanup removed {extra_elements_removed} empty element(s) before summary heading position")
+
+        # Final recalculation of table index before inserting heading
+        tbl_index = list(parent).index(tbl_element)
     
     # # Step 2: Add new centered "SUMMARY" heading at the position where summary was
     # summary_heading_para = OxmlElement('w:p')
@@ -2738,7 +3029,7 @@ def _add_summary_table(doc: Document, items: list, item_type: str, project_data:
     # parent.insert(tbl_index, summary_heading_para)
     # logger.info("✅ Inserted centered SUMMARY heading (no page break before)")
     
-    # Recalculate table index again after adding heading
+    # Recalculate table index again after any cleanup/heading adjustments
     tbl_index = list(parent).index(tbl_element)
     
     # Calculate totals based on item type
@@ -2821,65 +3112,76 @@ def _add_summary_table(doc: Document, items: list, item_type: str, project_data:
     # Center align the entire table
     new_summary_table.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    # Step 3: Move new table to correct position (after SUMMARY heading) and remove old table
+    # Step 3: Move new table to correct position and remove old table
     new_tbl_element = new_summary_table._element
     doc._body._element.remove(new_tbl_element)  # Remove from end
-    parent.insert(tbl_index + 1, new_tbl_element)  # Insert after heading (+1)
-    logger.info("✅ Inserted new summary table")
+
+    if is_image_based:
+        # For image-based templates, simply replace the existing table in place
+        # without adding extra page breaks or altering surrounding paragraphs.
+        parent.insert(tbl_index, new_tbl_element)
+        logger.info("✅ Inserted new summary table in-place for image-based template")
+    else:
+        # For coin/wine/content, insert after the (possibly re-centered) SUMMARY heading
+        parent.insert(tbl_index + 1, new_tbl_element)  # Insert after heading (+1)
+        logger.info("✅ Inserted new summary table")
     
     parent.remove(tbl_element)  # Remove old template table
     logger.info("✅ Removed old template table")
     
-    # Step 4: Add page break after summary table
-    summary_tbl_index = list(parent).index(new_tbl_element)
-    break_after_summary = OxmlElement('w:p')
-    break_run_after_summary = OxmlElement('w:r')
-    break_element_after_summary = OxmlElement('w:br')
-    break_element_after_summary.set(qn('w:type'), 'page')
-    break_run_after_summary.append(break_element_after_summary)
-    break_after_summary.append(break_run_after_summary)
-    parent.insert(summary_tbl_index + 1, break_after_summary)
-    logger.info("✅ Added page break after summary table")
-    
-    # Step 5: Aggressively clean up ALL empty lines/spaces after the page break until we find text content
-    cleanup_index = summary_tbl_index + 2  # Start after the page break we just added
-    elements_cleaned = 0
-    max_cleanup_after = 100  # Increased safety limit to handle more elements
-    cleanup_count_after = 0
-    
-    while cleanup_index < len(list(parent)) and cleanup_count_after < max_cleanup_after:
-        # Check if we're at the end of the document
-        if cleanup_index >= len(list(parent)):
-            logger.info("   → Reached end of document, stopping cleanup")
-            break
-            
-        element_to_check = list(parent)[cleanup_index]
+    # Step 4 & 5: Add page break after summary table and clean up trailing empties
+    # Only for non-image_based templates; image-based templates already manage
+    # end-of-document page breaks in _handle_appraisal_items.
+    if not is_image_based:
+        summary_tbl_index = list(parent).index(new_tbl_element)
+        break_after_summary = OxmlElement('w:p')
+        break_run_after_summary = OxmlElement('w:r')
+        break_element_after_summary = OxmlElement('w:br')
+        break_element_after_summary.set(qn('w:type'), 'page')
+        break_run_after_summary.append(break_element_after_summary)
+        break_after_summary.append(break_run_after_summary)
+        parent.insert(summary_tbl_index + 1, break_after_summary)
+        logger.info("✅ Added page break after summary table")
+
+        # Aggressively clean up ALL empty lines/spaces after the page break until we find text content
+        cleanup_index = summary_tbl_index + 2  # Start after the page break we just added
+        elements_cleaned = 0
+        max_cleanup_after = 100  # Increased safety limit to handle more elements
+        cleanup_count_after = 0
         
-        # Check if this element should be removed
-        should_remove_after = False
-        if element_to_check.tag.endswith('}p'):  # Paragraph
-            full_text = ''.join(element_to_check.itertext()) if hasattr(element_to_check, 'itertext') else ''
+        while cleanup_index < len(list(parent)) and cleanup_count_after < max_cleanup_after:
+            # Check if we're at the end of the document
+            if cleanup_index >= len(list(parent)):
+                logger.info("   → Reached end of document, stopping cleanup")
+                break
+                
+            element_to_check = list(parent)[cleanup_index]
             
-            # Remove if:
-            # 1. It's completely empty
-            # 2. It only contains whitespace (spaces, tabs, newlines, etc.)
-            # 3. It has no text content (just formatting)
-            if not full_text or not full_text.strip() or full_text.isspace():
-                should_remove_after = True
-                logger.info(f"   → Cleaning up empty/whitespace paragraph after summary table")
+            # Check if this element should be removed
+            should_remove_after = False
+            if element_to_check.tag.endswith('}p'):  # Paragraph
+                full_text = ''.join(element_to_check.itertext()) if hasattr(element_to_check, 'itertext') else ''
+                
+                # Remove if:
+                # 1. It's completely empty
+                # 2. It only contains whitespace (spaces, tabs, newlines, etc.)
+                # 3. It has no text content (just formatting)
+                if not full_text or not full_text.strip() or full_text.isspace():
+                    should_remove_after = True
+                    logger.info(f"   → Cleaning up empty/whitespace paragraph after summary table")
+            
+            if should_remove_after:
+                parent.remove(element_to_check)
+                elements_cleaned += 1
+                cleanup_count_after += 1
+                # Don't increment cleanup_index since we removed an element
+            else:
+                # Found actual content, stop cleaning
+                logger.info(f"   → Found content after summary table, stopping cleanup")
+                break
         
-        if should_remove_after:
-            parent.remove(element_to_check)
-            elements_cleaned += 1
-            cleanup_count_after += 1
-            # Don't increment cleanup_index since we removed an element
-        else:
-            # Found actual content, stop cleaning
-            logger.info(f"   → Found content after summary table, stopping cleanup")
-            break
-    
-    if elements_cleaned > 0:
-        logger.info(f"✅ Cleaned up {elements_cleaned} empty element(s) after summary table")
+        if elements_cleaned > 0:
+            logger.info(f"✅ Cleaned up {elements_cleaned} empty element(s) after summary table")
     
     logger.info(f"✅ Summary section complete: {total_items} items, ${total_value:,.2f} total value")
 
