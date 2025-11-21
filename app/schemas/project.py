@@ -26,6 +26,8 @@ class ProjectCreate(BaseModel):
     purpose: Optional[str] = None
     inspection_date: Optional[date] = None
     report_date: Optional[date] = None
+    effective_date: Optional[date] = None
+    appraisal_location: Optional[str] = None
     assigned_user_id: Optional[int] = None
     template_id: Optional[int] = None
     notes: Optional[str] = None
@@ -38,6 +40,8 @@ class ProjectUpdate(BaseModel):
     purpose: Optional[str] = None
     inspection_date: Optional[date] = None
     report_date: Optional[date] = None
+    effective_date: Optional[date] = None
+    appraisal_location: Optional[str] = None
     assigned_user_id: Optional[int] = None
     template_id: Optional[int] = None
     status: Optional[ProjectStatus] = None
@@ -54,6 +58,8 @@ class ProjectResponse(BaseModel):
     purpose: Optional[str] = None
     inspection_date: Optional[date] = None
     report_date: Optional[date] = None
+    effective_date: Optional[date] = None
+    appraisal_location: Optional[str] = None
     assigned_user_id: Optional[int] = None
     assigned_user_name: Optional[str] = None  # From joined user table
     status: str

@@ -32,6 +32,8 @@ class Project(Base):
     purpose = Column(Text)
     inspection_date = Column(Date)
     report_date = Column(Date)
+    effective_date = Column(Date)  # Effective date for the appraisal
+    appraisal_location = Column(String)  # Location where appraisal takes place
     dropbox_folder_link = Column(String)
     dropbox_folder_id = Column(String)
     notification_email = Column(String)  # Email for import notifications
