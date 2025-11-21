@@ -1,5 +1,5 @@
 import re
-import os
+import os, textwrap
 from typing import Dict, List, Tuple, Optional
 from docx import Document
 from docx.shared import Inches, RGBColor, Pt
@@ -10,7 +10,8 @@ from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 import logging
 from datetime import datetime
-
+from docx.parts.image import ImagePart
+from docx.oxml import parse_xml
 
 logger = logging.getLogger(__name__)
 
@@ -182,30 +183,24 @@ def generate_report_from_template(template_path: str, output_path: str,
         
         logger.info(f"📋📋📋 TEMPLATE CATEGORY: {template_category} 📋📋📋")
         
-        if template_category == TemplateCategory.IMAGE_BASED.value or template_category == "image_based":
-            # Use existing image-based logic (BACKWARD COMPATIBLE)
-            logger.info("🖼️ Using IMAGE-BASED rendering (photos + descriptions)")
-        _handle_appraisal_items(doc, project_data)
-        
-#-----
         if template_category == TemplateCategory.COIN.value or template_category == "coin":
             # Use table-based logic for coins
             logger.info("🪙 Using COIN TABLE rendering")
             _handle_coin_table(doc, project_data)
-        
-        elif template_category == TemplateCategory.CONTENT.value or template_category == "content":
-            # Use table-based logic for content/inventory
-            logger.info("📦 Using CONTENT INVENTORY TABLE rendering")
-            _handle_content_table(doc, project_data)
         
         elif template_category == TemplateCategory.WINE.value or template_category == "wine":
             # Use table-based logic for wine
             logger.info("🍷 Using WINE COLLECTION TABLE rendering")
             _handle_wine_table(doc, project_data)
         
+        elif template_category == TemplateCategory.CONTENT.value or template_category == "content":
+            # Use table-based logic for content/inventory
+            logger.info("📦 Using CONTENT INVENTORY TABLE rendering")
+            _handle_content_table(doc, project_data)
+        
         else:
-            # Default to image-based (safe fallback)
-            logger.warning(f"⚠️ Unknown category '{template_category}', using IMAGE-BASED as fallback")
+            # Use existing image-based logic (BACKWARD COMPATIBLE - DEFAULT)
+            logger.info("🖼️ Using IMAGE-BASED rendering (photos + descriptions)")
             _handle_appraisal_items(doc, project_data)
         
         logger.info("🔥🔥🔥 CATEGORY-SPECIFIC RENDERING COMPLETED 🔥🔥🔥")
@@ -2089,39 +2084,109 @@ def _parse_description_for_coin_wine(description: str, item_type: str) -> tuple:
     
     return (quantity, price)
 
-def _add_images_after_table(doc: Document, items: list, insert_index: int, parent):
-    """Add images from items after the table"""
-    import os
-    logger.info(f"🖼️ Adding images after table for {len(items)} items")
+def _add_images_after_table_coin_wine(doc: Document, items: list, tbl_element, parent):
+    """Add images from coin/wine items right after the table - NO PLACEHOLDER REPLACEMENT"""
+
+    logger.info(f"🖼️ Adding images after coin/wine table for {len(items)} items")
     
-    current_insert_index = insert_index
+    # Get the current position of the table
+    tbl_index = list(parent).index(tbl_element)
+
+    # Insert an initial page break immediately AFTER the table
+    page_break_after_table = OxmlElement('w:p')
+    br_run = OxmlElement('w:r')
+    br = OxmlElement('w:br')
+    br.set(qn('w:type'), 'page')
+    br_run.append(br)
+    page_break_after_table.append(br_run)
+    parent.insert(tbl_index + 1, page_break_after_table)
+
+    # We'll insert all image tables and additional breaks after this
+    current_insert_index = tbl_index + 2
     images_added = 0
-    
-    for item in items:
+    image_table = None
+
+    for idx, item in enumerate(items):
         photo_path = item.get('photo_path')
+        logger.info(f"🔍 Item {idx + 1}: photo_path = {photo_path}")
+        
         if photo_path and os.path.exists(photo_path):
             try:
-                # Create a new paragraph for the image
-                img_paragraph = doc.add_paragraph()
-                img_run = img_paragraph.add_run()
-                
-                # Add the image with a reasonable size
-                img_run.add_picture(photo_path, width=Inches(3), height=Inches(3))
-                
-                # Get the paragraph element and insert it at the correct position
-                img_p_element = img_paragraph._element
-                doc._body._element.remove(img_p_element)  # Remove from end
-                parent.insert(current_insert_index, img_p_element)  # Insert at position
-                
-                images_added += 1
-                current_insert_index += 1
-                logger.info(f"✅ Added image: {os.path.basename(photo_path)}")
+                # Validate image before adding
+                if _is_valid_image(photo_path):
+                    logger.info(f"📸 Placing image in grid for {os.path.basename(photo_path)}")
+
+                    # Start a new grid when needed (8 images per page)
+                    if images_added % 8 == 0:
+                        # For subsequent groups, insert a page break BEFORE starting a new grid
+                        if images_added > 0:
+                            group_break = OxmlElement('w:p')
+                            group_br_run = OxmlElement('w:r')
+                            group_br = OxmlElement('w:br')
+                            group_br.set(qn('w:type'), 'page')
+                            group_br_run.append(group_br)
+                            group_break.append(group_br_run)
+                            parent.insert(current_insert_index, group_break)
+                            current_insert_index += 1
+
+                        # Create a new image table (2 columns, up to 4 rows)
+                        image_table = doc.add_table(rows=1, cols=2)
+                        img_tbl_element = image_table._element
+                        body = img_tbl_element.getparent()
+                        if body is not None:
+                            body.remove(img_tbl_element)
+                        parent.insert(current_insert_index, img_tbl_element)
+                        current_insert_index += 1
+
+                    # Determine position within the current grid (2 columns x 4 rows, 8 images/page)
+                    index_in_group = images_added % 8
+                    row_idx = index_in_group // 2  # 0..3
+                    col_idx = index_in_group % 2   # 0 or 1
+
+                    # Ensure the table has enough rows
+                    while len(image_table.rows) <= row_idx:
+                        image_table.add_row()
+
+                    row = image_table.rows[row_idx]
+                    cell = row.cells[col_idx]
+
+                    # Clear existing content in the cell
+                    for p in list(cell.paragraphs):
+                        if p.text:
+                            p.text = ""
+
+                    # Add the image at 2" x 2" and center it
+                    paragraph = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
+                    run = paragraph.add_run()
+                    run.add_picture(photo_path, width=Inches(2), height=Inches(2))
+                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+                    images_added += 1
+                    logger.info(f"✅ Image {idx + 1} added to grid: {os.path.basename(photo_path)}")
+                else:
+                    logger.warning(f"⚠️ Invalid image file: {photo_path}")
             except Exception as e:
                 logger.error(f"❌ Failed to add image {photo_path}: {str(e)}")
+                import traceback
+                logger.error(traceback.format_exc())
         else:
-            logger.debug(f"⏭️ No photo or file not found for item")
-    
-    logger.info(f"✅ Added {images_added} images after table")
+            if photo_path:
+                logger.warning(f"⚠️ Photo file does not exist: {photo_path}")
+            else:
+                logger.debug(f"⏭️ Item {idx + 1} has no photo_path")
+
+    # After the last image group, ensure we end with a page break
+    if images_added > 0:
+        final_break = OxmlElement('w:p')
+        final_br_run = OxmlElement('w:r')
+        final_br = OxmlElement('w:br')
+        final_br.set(qn('w:type'), 'page')
+        final_br_run.append(final_br)
+        final_break.append(final_br_run)
+        parent.insert(current_insert_index, final_break)
+        logger.info("✅ Added page break after last image group")
+
+    logger.info(f"✅ Total images added after table: {images_added}")
     return images_added
 
 def _handle_coin_table(doc: Document, project_data: Dict):
@@ -2191,24 +2256,31 @@ def _handle_coin_table(doc: Document, project_data: Dict):
             
             # Parse description to extract quantity and price
             description = coin.get('description', '')
+            logger.info(f"Processing coin description: {description[:100] if description else 'EMPTY'}")
             quantity, price_per_coin = _parse_description_for_coin_wine(description, 'coins')
             
-            # Extract other fields from description using regex
+            # Extract other fields from description using regex - handle empty fields
             year_match = re.search(r'Year:\s*([^\n]+)', description)
-            condition_match = re.search(r'Condition:\s*([^\n]+)', description)
-            coin_desc_match = re.search(r'Coin Description:\s*([^\n]+)', description)
+            year_text = year_match.group(1).strip() if year_match and year_match.group(1).strip() else ''
             
-            row_cells[0].text = str(int(quantity)) if quantity else '0'
-            row_cells[1].text = year_match.group(1).strip() if year_match else ''
-            row_cells[2].text = coin_desc_match.group(1).strip() if coin_desc_match else description.split('\n')[0][:50]
-            row_cells[3].text = condition_match.group(1).strip() if condition_match else ''
+            condition_match = re.search(r'Condition:\s*([^\n]+)', description)
+            condition_text = condition_match.group(1).strip() if condition_match and condition_match.group(1).strip() else ''
+            
+            coin_desc_match = re.search(r'Coin Description:\s*([^\n]+)', description)
+            coin_desc_text = coin_desc_match.group(1).strip() if coin_desc_match and coin_desc_match.group(1).strip() else ''
+            
+            # Populate cells - use empty string for missing data
+            row_cells[0].text = str(int(quantity)) if quantity > 0 else ''
+            row_cells[1].text = year_text
+            row_cells[2].text = coin_desc_text
+            row_cells[3].text = condition_text
             
             # Auto-calculate and format price (quantity * price_per_coin)
-            total_value = quantity * price_per_coin
+            total_value = quantity * price_per_coin if quantity > 0 and price_per_coin > 0 else 0
             try:
-                row_cells[4].text = f"${total_value:,.2f}"
+                row_cells[4].text = f"${total_value:,.2f}" if total_value > 0 else ''
             except:
-                row_cells[4].text = "$0.00"
+                row_cells[4].text = ''
             
             # Format cells
             for cell in row_cells:
@@ -2227,21 +2299,13 @@ def _handle_coin_table(doc: Document, project_data: Dict):
         parent.remove(tbl_element)  # Remove old template table
         logger.info("✅ Removed old template table")
         
-        # Add images after the table
-        _add_images_after_table(doc, coin_items, tbl_index + 1, parent)
+        # Recalculate new table element position after old table removal
+        new_tbl_element = new_table._element
         
-        # Add page break after images (page break will be added after all images)
-        # Count how many elements (paragraphs) were added for images
-        images_added = len([item for item in coin_items if item.get('photo_path')])
-        
-        break_after_data = OxmlElement('w:p')
-        break_run_after_data = OxmlElement('w:r')
-        break_element_after_data = OxmlElement('w:br')
-        break_element_after_data.set(qn('w:type'), 'page')
-        break_run_after_data.append(break_element_after_data)
-        break_after_data.append(break_run_after_data)
-        parent.insert(tbl_index + 1 + images_added, break_after_data)
-        logger.info("✅ Added page break after coin data table and images")
+        # Add images right after the table on their own pages (handled inside helper)
+        logger.info(f"🖼️ Attempting to add images for {len(coin_items)} coin items")
+        images_added = _add_images_after_table_coin_wine(doc, coin_items, new_tbl_element, parent)
+        logger.info(f"✅ Added {images_added} images after coin table")
         
         # Add summary table after data table
         _add_summary_table(doc, coin_items, 'coin', project_data)
@@ -2421,26 +2485,29 @@ def _handle_wine_table(doc: Document, project_data: Dict):
             
             # Parse description to extract quantity and price
             description = wine.get('description', '')
+            logger.info(f"Processing wine description: {description[:100] if description else 'EMPTY'}")
             quantity, price_per_bottle = _parse_description_for_coin_wine(description, 'wine')
             
-            # Extract bottle description from template
+            # Extract bottle description and year from template - handle empty fields
             bottle_desc_match = re.search(r'Bottle Description:\s*([^\n]+)', description)
+            bottle_desc_text = bottle_desc_match.group(1).strip() if bottle_desc_match and bottle_desc_match.group(1).strip() else ''
             
-            row_cells[0].text = str(int(quantity)) if quantity else '0'
-            row_cells[1].text = bottle_desc_match.group(1).strip() if bottle_desc_match else description.split('\n')[0][:50]
+            # Populate cells - use empty string for missing data
+            row_cells[0].text = str(int(quantity)) if quantity > 0 else ''
+            row_cells[1].text = bottle_desc_text
             
-            # Format prices
+            # Format prices - use empty string for zero values
             try:
-                row_cells[2].text = f"${price_per_bottle:,.2f}"
+                row_cells[2].text = f"${price_per_bottle:,.2f}" if price_per_bottle > 0 else ''
             except:
-                row_cells[2].text = "$0.00"
+                row_cells[2].text = ''
             
             # Auto-calculate and format total price (quantity * price_per_bottle)
-            total_value = quantity * price_per_bottle
+            total_value = quantity * price_per_bottle if quantity > 0 and price_per_bottle > 0 else 0
             try:
-                row_cells[3].text = f"${total_value:,.2f}"
+                row_cells[3].text = f"${total_value:,.2f}" if total_value > 0 else ''
             except:
-                row_cells[3].text = "$0.00"
+                row_cells[3].text = ''
             
             # Format cells
             for cell in row_cells:
@@ -2459,21 +2526,13 @@ def _handle_wine_table(doc: Document, project_data: Dict):
         parent.remove(tbl_element)  # Remove old template table
         logger.info("✅ Removed old template table")
         
-        # Add images after the table
-        _add_images_after_table(doc, wine_items, tbl_index + 1, parent)
+        # Recalculate new table element position after old table removal
+        new_tbl_element = new_table._element
         
-        # Add page break after images (page break will be added after all images)
-        # Count how many elements (paragraphs) were added for images
-        images_added = len([item for item in wine_items if item.get('photo_path')])
-        
-        break_after_data = OxmlElement('w:p')
-        break_run_after_data = OxmlElement('w:r')
-        break_element_after_data = OxmlElement('w:br')
-        break_element_after_data.set(qn('w:type'), 'page')
-        break_run_after_data.append(break_element_after_data)
-        break_after_data.append(break_run_after_data)
-        parent.insert(tbl_index + 1 + images_added, break_after_data)
-        logger.info("✅ Added page break after wine data table and images")
+        # Add images right after the table on their own pages (handled inside helper)
+        logger.info(f"🖼️ Attempting to add images for {len(wine_items)} wine items")
+        images_added = _add_images_after_table_coin_wine(doc, wine_items, new_tbl_element, parent)
+        logger.info(f"✅ Added {images_added} images after wine table")
         
         # Add summary table after data table
         _add_summary_table(doc, wine_items, 'wine', project_data)
@@ -2546,10 +2605,17 @@ def _add_summary_table(doc: Document, items: list, item_type: str, project_data:
     # Get summary paragraph position
     summary_para_element = summary_paragraph._element
     summary_para_index = list(parent).index(summary_para_element)
-    
+    page_break_before_summary = OxmlElement('w:p')
+    page_break_run = OxmlElement('w:r')
+    page_break_el = OxmlElement('w:br')
+    page_break_el.set(qn('w:type'), 'page')
+    page_break_run.append(page_break_el)
+    page_break_before_summary.append(page_break_run)
+    parent.insert(tbl_index, page_break_before_summary)
+    logger.info("✅ Added page break BEFORE SUMMARY heading")
     # Step 1: Remove the existing summary text paragraph and ALL content between it and the table
-    parent.remove(summary_para_element)
-    logger.info("✅ Removed existing summary text")
+    # parent.remove(summary_para_element)
+    # logger.info("✅ Removed existing summary text")
     
     # Aggressively remove ALL elements between the old summary position and the table
     # This ensures we clean up any page breaks, empty paragraphs, whitespace, or other elements
@@ -2641,44 +2707,36 @@ def _add_summary_table(doc: Document, items: list, item_type: str, project_data:
     if extra_elements_removed > 0:
         logger.info(f"✅ Extra cleanup removed {extra_elements_removed} empty element(s) before summary heading position")
 
-    page_break_before_summary = OxmlElement('w:p')
-    page_break_run = OxmlElement('w:r')
-    page_break_el = OxmlElement('w:br')
-    page_break_el.set(qn('w:type'), 'page')
-    page_break_run.append(page_break_el)
-    page_break_before_summary.append(page_break_run)
-    parent.insert(tbl_index, page_break_before_summary)
-    logger.info("✅ Added page break BEFORE SUMMARY heading")
-
+    
     # Final recalculation of table index before inserting heading
     tbl_index = list(parent).index(tbl_element)
     
-    # Step 2: Add new centered "SUMMARY" heading at the position where summary was
-    summary_heading_para = OxmlElement('w:p')
-    # Add paragraph properties for center alignment
-    pPr = OxmlElement('w:pPr')
-    jc = OxmlElement('w:jc')
-    jc.set(qn('w:val'), 'center')
-    pPr.append(jc)
-    summary_heading_para.append(pPr)
-    # Add the text run
-    summary_run = OxmlElement('w:r')
-    summary_rPr = OxmlElement('w:rPr')
-    # Make it bold
-    bold = OxmlElement('w:b')
-    summary_rPr.append(bold)
-    # Set font size to 14pt
-    sz = OxmlElement('w:sz')
-    sz.set(qn('w:val'), '28')  # 28 half-points = 14pt
-    summary_rPr.append(sz)
-    summary_run.append(summary_rPr)
-    # Add text
-    summary_text = OxmlElement('w:t')
-    summary_text.text = "SUMMARY"
-    summary_run.append(summary_text)
-    summary_heading_para.append(summary_run)
-    parent.insert(tbl_index, summary_heading_para)
-    logger.info("✅ Inserted centered SUMMARY heading (no page break before)")
+    # # Step 2: Add new centered "SUMMARY" heading at the position where summary was
+    # summary_heading_para = OxmlElement('w:p')
+    # # Add paragraph properties for center alignment
+    # pPr = OxmlElement('w:pPr')
+    # jc = OxmlElement('w:jc')
+    # jc.set(qn('w:val'), 'center')
+    # pPr.append(jc)
+    # summary_heading_para.append(pPr)
+    # # Add the text run
+    # summary_run = OxmlElement('w:r')
+    # summary_rPr = OxmlElement('w:rPr')
+    # # Make it bold
+    # bold = OxmlElement('w:b')
+    # summary_rPr.append(bold)
+    # # Set font size to 14pt
+    # sz = OxmlElement('w:sz')
+    # sz.set(qn('w:val'), '28')  # 28 half-points = 14pt
+    # summary_rPr.append(sz)
+    # summary_run.append(summary_rPr)
+    # # Add text
+    # summary_text = OxmlElement('w:t')
+    # summary_text.text = "SUMMARY"
+    # summary_run.append(summary_text)
+    # summary_heading_para.append(summary_run)
+    # parent.insert(tbl_index, summary_heading_para)
+    # logger.info("✅ Inserted centered SUMMARY heading (no page break before)")
     
     # Recalculate table index again after adding heading
     tbl_index = list(parent).index(tbl_element)
@@ -2690,17 +2748,21 @@ def _add_summary_table(doc: Document, items: list, item_type: str, project_data:
     if item_type == 'coin':
         for item in items:
             try:
-                quantity = float(item.get('quantity', 0))
-                price = float(item.get('appraised_price', 0))
-                total_value += (quantity * price)
-            except:
-                pass
+                # Parse description to get quantity and price
+                description = item.get('description', '')
+                quantity, price_per_coin = _parse_description_for_coin_wine(description, 'coins')
+                total_value += (quantity * price_per_coin)
+            except Exception as e:
+                logger.error(f"Error calculating coin value: {str(e)}")
     elif item_type == 'wine':
         for item in items:
             try:
-                total_value += float(item.get('total_price', 0))
-            except:
-                pass
+                # Parse description to get quantity and price
+                description = item.get('description', '')
+                quantity, price_per_bottle = _parse_description_for_coin_wine(description, 'wine')
+                total_value += (quantity * price_per_bottle)
+            except Exception as e:
+                logger.error(f"Error calculating wine value: {str(e)}")
     elif item_type == 'content':
         for item in items:
             try:
