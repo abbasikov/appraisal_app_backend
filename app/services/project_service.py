@@ -24,9 +24,18 @@ class ProjectService:
             if not client:
                 return None
             
+            # Update client's case_name if provided
+            if project.case_name:
+                client.case_name = project.case_name.strip()
+                db.commit()
+            
+            # Determine account_id: use provided value or fallback to client's parent_account_id
+            account_id = project.account_id or client.parent_account_id
+            
             db_project = Project(
                 project_name=project.project_name.strip(),
                 client_id=project.client_id,
+                account_id=account_id,  # Use determined account_id (from request or client's parent account)
                 assigned_user_id=project.assigned_user_id or user_id,
                 case_number=project.case_number.strip() if project.case_number else None,
                 appraisal_type=project.appraisal_type,
@@ -49,7 +58,7 @@ class ProjectService:
                     user_id=user_id,
                     project_id=db_project.id,
                     action=f"Created project: {project.project_name}",
-                    details={"project_id": db_project.id, "client_id": project.client_id}
+                    details={"project_id": db_project.id, "client_id": project.client_id, "account_id": account_id}
                 )
                 db.add(activity)
                 db.commit()

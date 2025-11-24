@@ -21,6 +21,7 @@ class ProjectStatus(str, Enum):
 class ProjectCreate(BaseModel):
     project_name: str
     client_id: int
+    case_name: Optional[str] = None  # Case name to store in client table
     case_number: Optional[str] = None
     appraisal_type: AppraisalType = AppraisalType.DIVORCE  # Default to divorce
     purpose: Optional[str] = None
@@ -29,6 +30,7 @@ class ProjectCreate(BaseModel):
     effective_date: Optional[date] = None
     appraisal_location: Optional[str] = None
     assigned_user_id: Optional[int] = None
+    account_id: Optional[int] = None  # Account/Law firm associated with project
     template_id: Optional[int] = None
     notes: Optional[str] = None
 
@@ -43,6 +45,7 @@ class ProjectUpdate(BaseModel):
     effective_date: Optional[date] = None
     appraisal_location: Optional[str] = None
     assigned_user_id: Optional[int] = None
+    account_id: Optional[int] = None  # Account/Law firm associated with project
     template_id: Optional[int] = None
     status: Optional[ProjectStatus] = None
     dropbox_folder_link: Optional[str] = None

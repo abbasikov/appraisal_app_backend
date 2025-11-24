@@ -14,6 +14,7 @@ from app.utils.template_converter import (
     ConversionError,
     ReportGenerationError
 )
+from app.core.config import settings
 import logging
 
 logger = logging.getLogger(__name__)
@@ -220,17 +221,21 @@ class TemplateService:
             def _fetch_metals_from_external(date_):
                 """Fetch historical metal prices for the exact date from MetalpriceAPI.
 
-                Reads the API key from METALPRICE_API_KEY (preferred) or METALS_API_KEY
-                environment variable. Called at most once per report generation and
-                results are cached in the database.
+                Reads the API key from METALPRICE_API_KEY environment variable or settings.
+                Called at most once per report generation and results are cached.
                 """
                 api_key = (
                     os.environ.get("METALPRICE_API_KEY")
-                    or os.environ.get("METALS_API_KEY")
-                    or os.environ.get("metalprice_api_key")
+                    or settings.METALPRICE_API_KEY
                 )
+                
+                logger.info(f"🔍 Checking for METALPRICE_API_KEY...")
+                logger.info(f"   From env: {os.environ.get('METALPRICE_API_KEY')[:10] if os.environ.get('METALPRICE_API_KEY') else 'NOT SET'}")
+                logger.info(f"   From settings: {settings.METALPRICE_API_KEY[:10] if settings.METALPRICE_API_KEY else 'NOT SET'}")
+                
                 if not api_key or not date_:
-                    logger.warning("MetalpriceAPI key not set or effective_date missing; skipping external metals fetch")
+                    logger.warning(f"❌ MetalpriceAPI key not set or effective_date missing; skipping external metals fetch")
+                    logger.warning(f"   api_key: {bool(api_key)}, date_: {bool(date_)}")
                     return {}
 
                 try:
@@ -246,12 +251,14 @@ class TemplateService:
                         "base": "USD",
                         "currencies": "XAU,XAG,XPT",
                     }
+                    logger.info(f"🌐 Fetching metals prices from {url}")
                     resp = requests.get(url, params=params, timeout=10)
                     resp.raise_for_status()
                     data = resp.json()
+                    logger.info(f"✅ Metals API response received: {data}")
 
                     if not data.get("success", True):
-                        logger.warning(f"Metals API returned unsuccessful response: {data}")
+                        logger.warning(f"❌ Metals API returned unsuccessful response: {data}")
                         return {}
 
                     rates = data.get("rates", {}) or {}
