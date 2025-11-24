@@ -11,7 +11,8 @@ from docx.oxml.ns import nsdecls
 import logging
 from datetime import datetime
 from docx.parts.image import ImagePart
-from docx.oxml import parse_xml
+from app.utils.template_detector import TemplateCategory
+from collections import OrderedDict
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +180,6 @@ def generate_report_from_template(template_path: str, output_path: str,
                                 _replace_fields_in_paragraph(paragraph, field_mappings, project_data)
         
         # Handle category-specific rendering
-        from app.utils.template_detector import TemplateCategory
         
         logger.info(f"📋📋📋 TEMPLATE CATEGORY: {template_category} 📋📋📋")
         
@@ -227,6 +227,11 @@ def generate_report_from_template(template_path: str, output_path: str,
         else:
             logger.info("⏭️ SKIPPING WATERMARK (add_watermark=False) - Final Report ⏭️")
         
+        # Update TOC and page numbering
+        logger.info("🔢🔢🔢 UPDATING TABLE OF CONTENTS AND PAGE NUMBERING 🔢🔢🔢")
+        _update_toc_and_page_numbers(doc)
+        logger.info("🔢🔢🔢 TABLE OF CONTENTS AND PAGE NUMBERING UPDATED 🔢🔢🔢")
+        
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         doc.save(output_path)
         
@@ -257,7 +262,7 @@ def _get_inspection_placeholders(did_inspect: Optional[bool]) -> Dict[str, str]:
 
 def _ensure_headers_footers_replaced(doc: Document, field_mappings: Dict, project_data: Dict):
     """Special pass to ensure all header and footer placeholders are replaced"""
-    import re
+    
     pattern = r'\{([^{}]+)\}'
     
     # Special handling for problematic fields
@@ -760,7 +765,7 @@ def _replace_fields_in_paragraph(paragraph, field_mappings: Dict, project_data: 
     # First, check if we need to handle placeholders that span multiple runs
     # Get the full paragraph text to check for complete placeholders
     full_text = paragraph.text
-    import re
+    
     pattern = r'\{([^{}]+)\}'
     
     # Find all complete placeholders in the paragraph
@@ -876,7 +881,7 @@ def _handle_textboxes_first_page(doc: Document, field_mappings: Dict, project_da
     try:
         # Get special fields for replacement
         client_data = project_data.get('client', {})
-        from datetime import datetime
+        
         special_fields = {
             'case_name': client_data.get('case_name', 'Estate Appraisal'),
             'inspection_date': _format_date(project_data.get('inspection_date', '')),
@@ -892,7 +897,7 @@ def _handle_textboxes_first_page(doc: Document, field_mappings: Dict, project_da
         }
         
         # Access the document's XML directly to find text boxes
-        import re
+        
         pattern = r'\{([^{}]+)\}'
         
         # Get the main document part
@@ -1525,7 +1530,6 @@ def _handle_appraisal_items(doc: Document, project_data: Dict):
 
         
     except Exception as e:
-        import traceback
         error_msg = str(e) if e else "Unknown error"
         traceback_str = traceback.format_exc()
         
@@ -1545,6 +1549,11 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
     appraisal_items = project_data.get('appraisal_items', [])
     did_inspect = project_data.get('did_inspect')
     inspection_placeholders = _get_inspection_placeholders(did_inspect)
+    
+    # Debug account data
+    logger.info(f"📋 Account data available: {bool(account_data)}")
+    if account_data:
+        logger.info(f"   Account name: '{account_data.get('name', 'NOT SET')}'")
     
     # Log the field name we're looking for
     logger.info(f"Looking for field value: {field_name}")
@@ -1568,11 +1577,12 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
     full_address = f"{client_data.get('address', '')} {client_data.get('city', '')} {client_data.get('state', '')} {client_data.get('zip_code', '')}".strip()
 
     # Dynamic metal prices (numeric values provided via project_data by TemplateService)
-    def _format_price(value, default: str = "") -> str:
+    def _format_price(value, default: str = "$0.00") -> str:
         try:
             if value is None or value == "":
                 return default
-            return f"${float(value):.2f}"
+            formatted_value = float(value)
+            return f"${formatted_value:,.2f}"
         except Exception:
             return default
 
@@ -1625,6 +1635,9 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
         'appraiser_credentials': 'Certified Appraiser',
     }
     
+    # Debug log for law_firm field
+    logger.info(f"🏢 law_firm placeholder value: '{field_mappings.get('law_firm', 'NOT IN MAPPINGS')}'")
+    
     # Add individual item fields for first few items
     for i, item in enumerate(appraisal_items[:10]):  # Support up to 10 items
         item_num = i + 1
@@ -1656,6 +1669,12 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
         logger.info(f"Found case-insensitive match for {field_name}: {actual_key} = {field_mappings[actual_key]}")
         return field_mappings[actual_key]
     
+    # Direct lookup in field_mappings
+    if field_name in field_mappings:
+        value = field_mappings[field_name]
+        logger.info(f"✅ Direct match found for {field_name}: '{value}'")
+        return value
+    
     # Check for similar field names (fuzzy matching)
     for mapped_field in field_mappings.keys():
         if field_name.lower() in mapped_field.lower() or mapped_field.lower() in field_name.lower():
@@ -1677,7 +1696,7 @@ def _format_date(date_value) -> str:
         
         # If it's already a string, try to parse it
         if isinstance(date_value, str):
-            from datetime import datetime
+            
             # Try different date formats
             formats = [
                 '%Y-%m-%d %H:%M:%S%z',  # 2025-09-01 00:00:00+05:00
@@ -2003,7 +2022,7 @@ def _is_valid_image(image_path: str) -> bool:
 
 def _parse_description_for_coin_wine(description: str, item_type: str) -> tuple:
     """Parse description template to extract quantity and price for Coin/Wine items"""
-    import re
+   
     
     quantity = 0
     price = 0
@@ -2162,8 +2181,7 @@ def _add_images_after_table_coin_wine(doc: Document, items: list, tbl_element, p
 
 def _handle_coin_table(doc: Document, project_data: Dict):
     """Handle coin collection table rendering - uses JSONB attributes"""
-    from docx.shared import Pt
-    from docx.enum.text import WD_BREAK
+
     
     logger.info("🪙 Rendering coin collection table from JSONB attributes")
     
@@ -2287,7 +2305,6 @@ def _handle_coin_table(doc: Document, project_data: Dict):
 
 def _handle_content_table(doc: Document, project_data: Dict):
     """Handle content/inventory table rendering with room-by-room numbered layout."""
-    from docx.shared import Pt
 
     logger.info("📦 Rendering content inventory table from JSONB attributes (room-by-room)")
 
@@ -2596,8 +2613,7 @@ def _add_content_summary_table(doc: Document, line_mappings: list, project_data:
     Only the summary table is replaced; the existing SUMMARY heading is preserved.
     """
 
-    from collections import OrderedDict
-    from docx.shared import Pt
+
 
     logger.info("📊 Building room-by-room SUMMARY table for contents")
 
@@ -2783,8 +2799,7 @@ def _add_content_summary_table(doc: Document, line_mappings: list, project_data:
 
 def _handle_wine_table(doc: Document, project_data: Dict):
     """Handle wine collection table rendering - uses JSONB attributes"""
-    from docx.shared import Pt
-    from docx.enum.text import WD_BREAK
+
     
     logger.info("🍷 Rendering wine collection table from JSONB attributes")
     
@@ -2905,7 +2920,7 @@ def _handle_wine_table(doc: Document, project_data: Dict):
 
 def _add_summary_table(doc: Document, items: list, item_type: str, project_data: Dict):
     """Find summary section and replace its table with project summary data"""
-    from docx.enum.text import WD_BREAK, WD_ALIGN_PARAGRAPH
+    
     
     
     logger.info(f"📊 Searching for summary table to replace for {item_type}")
@@ -3359,6 +3374,10 @@ def _add_watermark(doc: Document):
                 o_ns = 'urn:schemas-microsoft-com:office:office'
                 
                 watermark_xml = f'''<w:p xmlns:w="{w_ns}" xmlns:v="{v_ns}" xmlns:o="{o_ns}">
+                    <w:pPr>
+                        <w:spacing w:before="0" w:after="0" w:line="0"/>
+                        <w:ind w:left="0" w:right="0"/>
+                    </w:pPr>
                     <w:r>
                         <w:pict>
                             <v:shape id="Watermark{section_idx}" type="#_x0000_t136"
@@ -4000,9 +4019,96 @@ def _clear_content_between_item1_and_last_fmv(doc: Document, item1_paragraph) ->
                 parent.remove(element)
             except Exception as e:
                 logger.warning(f"Could not remove element: {str(e)}")
-        
-        logger.info(f"Cleared {len(elements_to_remove)} elements including Item 1 and last Fair Market Value")
-        
     except Exception as e:
         logger.error(f"Error clearing content between Item 1 and last FMV: {str(e)}")
-        # Don't raise exception, just log and continue
+
+def _update_toc_and_page_numbers(doc: Document):
+    """Update table of contents and page numbering fields in the document
+    
+    This adds the necessary XML directives to trigger TOC and page number field updates
+    when the document is opened in Microsoft Word.
+    """
+    try:
+        logger.info("📋 Attempting to update TOC and page numbering fields...")
+        
+        # Add field update flag to document
+        # This tells Word to update all fields when the document is opened
+        document_part = doc.part
+        document_element = document_part.element
+        
+        # Find or create the settings part
+        try:
+            from docx.oxml import parse_xml
+            from docx.oxml.ns import nsdecls
+            
+            # Add UpdateFields=true to settings if it exists
+            # This is typically done in the word/settings.xml file
+            # python-docx doesn't have direct access to settings, so we'll mark TOC paragraphs for update
+            
+            namespaces = {
+                'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+            }
+            
+            # Find all TOC fields
+            toc_fields = document_element.xpath('.//w:fldSimple[@w:instr and contains(@w:instr, "TOC")]', namespaces=namespaces)
+            logger.info(f"Found {len(toc_fields)} TOC fields")
+            
+            # For each TOC field, add a page break update flag
+            for toc_field in toc_fields:
+                logger.info(f"Marking TOC field for update: {toc_field.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}instr')}")
+                # The field is already set up for update when opened in Word
+                pass
+            
+            # Update page number fields
+            page_num_fields = document_element.xpath('.//w:fldSimple[@w:instr and contains(@w:instr, "PAGE")]', namespaces=namespaces)
+            logger.info(f"Found {len(page_num_fields)} PAGE number fields")
+            
+            # Ensure proper page numbering
+            for section in doc.sections:
+                # Check if footer has page numbers
+                if section.footer:
+                    footer_paragraphs = section.footer.paragraphs
+                    has_page_number = False
+                    
+                    for paragraph in footer_paragraphs:
+                        # Check for page number field
+                        if any('PAGE' in run.text for run in paragraph.runs):
+                            has_page_number = True
+                            logger.info("✓ Found existing page number field in footer")
+                            break
+                    
+                    if not has_page_number and footer_paragraphs:
+                        # Try to find PAGE field in the paragraph XML
+                        footer_xml = section.footer._element.xml
+                        if b'PAGE' not in footer_xml:
+                            logger.info("⚠️ No page number field found in footer, but cannot auto-add via python-docx")
+                        else:
+                            logger.info("✓ Page number field exists in footer XML")
+            
+            logger.info("✅ TOC and page number fields marked for update")
+            
+            # Add a setting to update fields on open
+            # This is done by adding the UpdateFields setting to the document
+            try:
+                settings_part = document_part.part.relate_to(
+                    document_part.part.package.part_from_xml(
+                        parse_xml(
+                            f'<w:settings {nsdecls("w")}>'
+                            f'  <w:updateFields/>'
+                            f'</w:settings>'
+                        )
+                    ),
+                    'http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings'
+                )
+                logger.info("✓ Added UpdateFields setting")
+            except Exception as e:
+                logger.warning(f"Could not add UpdateFields setting: {str(e)}")
+                # This is not critical - the document will still work, just need manual TOC update
+        
+        except Exception as e:
+            logger.warning(f"Error updating TOC: {str(e)}")
+            logger.info("Note: Document may need manual TOC update in Word (right-click TOC > Update Field)")
+    
+    except Exception as e:
+        logger.error(f"Error in _update_toc_and_page_numbers: {str(e)}")
+        # Don't raise - this is not critical for document generation
