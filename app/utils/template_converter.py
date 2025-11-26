@@ -1,5 +1,6 @@
 import re
 import os, textwrap
+import traceback
 from typing import Dict, List, Tuple, Optional
 from docx import Document
 from docx.shared import Inches, RGBColor, Pt
@@ -250,7 +251,7 @@ def _get_inspection_placeholders(did_inspect: Optional[bool]) -> Dict[str, str]:
         }
     elif did_inspect is False:
         return {
-            'did_personally_inspect': 'did not personally inspect',
+            'did_personally_inspect': 'did not personally inspected',
             'was_present': 'was not present'
         }
     else:
@@ -565,6 +566,9 @@ def _final_placeholder_check(doc: Document, field_mappings: Dict, project_data: 
         'death_date': _format_date(client_data.get('date_of_death', '')),
         'project_name': project_data.get('project_name', 'Appraisal Project'),
         'estate_of': client_data.get('name', ''),
+        'DOD': _format_date(project_data.get('date_of_death', '')),  # Date of death from project
+        'date_of_death': _format_date(project_data.get('date_of_death', '')),  # Alias
+        'estate_of_project': project_data.get('estate_of', ''),  # Estate name from project
             'law_firm': account_data.get('name', ''),  # law_firm uses name from account table
         **inspection_placeholders
     }
@@ -1558,8 +1562,11 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
     # Log the field name we're looking for
     logger.info(f"Looking for field value: {field_name}")
     
-    # Check if the field is directly in project_data first
-    if field_name in project_data:
+    # IMPORTANT: Don't check for raw price values in project_data directly
+    # They should always be formatted via field_mappings
+    
+    # Check if the field is directly in project_data first (but skip metal prices)
+    if field_name in project_data and field_name not in ['gold_price', 'silver_price', 'plat_price']:
         logger.info(f"Found {field_name} directly in project_data: {project_data[field_name]}")
         return project_data[field_name]
     
@@ -1580,15 +1587,23 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
     def _format_price(value, default: str = "$0.00") -> str:
         try:
             if value is None or value == "":
+                logger.info(f"💰 _format_price: value is None or empty, using default: {default}")
                 return default
             formatted_value = float(value)
-            return f"${formatted_value:,.2f}"
-        except Exception:
+            result = f"${formatted_value:,.2f}"
+            logger.info(f"💰 _format_price: raw_value={value} -> formatted={result}")
+            return result
+        except Exception as e:
+            logger.warning(f"💰 _format_price: Exception formatting {value}: {e}, using default: {default}")
             return default
 
     gold_price_value = project_data.get('gold_price')
     silver_price_value = project_data.get('silver_price')
     plat_price_value = project_data.get('plat_price')
+    
+    logger.info(f"💛 gold_price_value from project_data: {gold_price_value} (type: {type(gold_price_value).__name__})")
+    logger.info(f"⚪ silver_price_value from project_data: {silver_price_value} (type: {type(silver_price_value).__name__})")
+    logger.info(f"🔘 plat_price_value from project_data: {plat_price_value} (type: {type(plat_price_value).__name__})")
     
     # Comprehensive field mapping
     field_mappings = {
@@ -1619,8 +1634,13 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
         'case_name': client_data.get('case_name', 'Appraisal'),
         'estate_of': client_data.get('name', ''),
         
+        # Estate-specific fields (from project table, not client table)
+        'DOD': _format_date(project_data.get('date_of_death', '')),  # Date of death from project
+        'date_of_death': _format_date(project_data.get('date_of_death', '')),  # Alias
+        'estate_of_project': project_data.get('estate_of', ''),  # Estate name from project
+        
         # Account fields
-            'law_firm': account_data.get('name', ''),  # law_firm uses name from account table
+        'law_firm': account_data.get('name', ''),  # law_firm uses name from account table
         
         # Inspection fields
         **inspection_placeholders,
@@ -1637,6 +1657,9 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
     
     # Debug log for law_firm field
     logger.info(f"🏢 law_firm placeholder value: '{field_mappings.get('law_firm', 'NOT IN MAPPINGS')}'")
+    logger.info(f"💛 gold_price in field_mappings: {field_mappings.get('gold_price', 'NOT SET')}")
+    logger.info(f"⚪ silver_price in field_mappings: {field_mappings.get('silver_price', 'NOT SET')}")
+    logger.info(f"🔘 plat_price in field_mappings: {field_mappings.get('plat_price', 'NOT SET')}")
     
     # Add individual item fields for first few items
     for i, item in enumerate(appraisal_items[:10]):  # Support up to 10 items

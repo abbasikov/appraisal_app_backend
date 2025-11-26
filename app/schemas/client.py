@@ -40,6 +40,10 @@ class ClientResponse(BaseModel):
     name: str
     parent_account_id: Optional[int] = None
     parent_account_name: Optional[str] = None  # From joined account table
+    parent_account_address: Optional[str] = None  # From parent account
+    parent_account_city: Optional[str] = None  # From parent account
+    parent_account_state: Optional[str] = None  # From parent account
+    parent_account_zip: Optional[str] = None  # From parent account
     company: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None

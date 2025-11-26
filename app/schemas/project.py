@@ -23,12 +23,14 @@ class ProjectCreate(BaseModel):
     client_id: int
     case_name: Optional[str] = None  # Case name to store in client table
     case_number: Optional[str] = None
-    appraisal_type: AppraisalType = AppraisalType.DIVORCE  # Default to divorce
+    appraisal_type: AppraisalType  # No default - must be selected
     purpose: Optional[str] = None
     inspection_date: Optional[date] = None
     report_date: Optional[date] = None
     effective_date: Optional[date] = None
     appraisal_location: Optional[str] = None
+    estate_of: Optional[str] = None  # Name of the estate (for ESTATE appraisals)
+    date_of_death: Optional[date] = None  # Date of death (for ESTATE appraisals)
     assigned_user_id: Optional[int] = None
     account_id: Optional[int] = None  # Account/Law firm associated with project
     template_id: Optional[int] = None
@@ -44,6 +46,8 @@ class ProjectUpdate(BaseModel):
     report_date: Optional[date] = None
     effective_date: Optional[date] = None
     appraisal_location: Optional[str] = None
+    estate_of: Optional[str] = None  # Name of the estate (for ESTATE appraisals)
+    date_of_death: Optional[date] = None  # Date of death (for ESTATE appraisals)
     assigned_user_id: Optional[int] = None
     account_id: Optional[int] = None  # Account/Law firm associated with project
     template_id: Optional[int] = None
@@ -63,6 +67,8 @@ class ProjectResponse(BaseModel):
     report_date: Optional[date] = None
     effective_date: Optional[date] = None
     appraisal_location: Optional[str] = None
+    estate_of: Optional[str] = None  # Name of the estate (for ESTATE appraisals)
+    date_of_death: Optional[date] = None  # Date of death (for ESTATE appraisals)
     assigned_user_id: Optional[int] = None
     assigned_user_name: Optional[str] = None  # From joined user table
     status: str

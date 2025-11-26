@@ -75,12 +75,20 @@ class ClientService:
             
             clients = query.offset(skip).limit(limit).all()
             
-            # Manually set parent_account_name for response
+            # Manually set parent_account fields for response
             for client in clients:
                 if client.parent_account:
                     client.parent_account_name = client.parent_account.name
+                    client.parent_account_address = client.parent_account.address
+                    client.parent_account_city = client.parent_account.city
+                    client.parent_account_state = client.parent_account.state
+                    client.parent_account_zip = client.parent_account.zip_code
                 else:
                     client.parent_account_name = None
+                    client.parent_account_address = None
+                    client.parent_account_city = None
+                    client.parent_account_state = None
+                    client.parent_account_zip = None
             
             return clients
         except Exception as e:
@@ -98,8 +106,16 @@ class ClientService:
             
             if client and client.parent_account:
                 client.parent_account_name = client.parent_account.name
+                client.parent_account_address = client.parent_account.address
+                client.parent_account_city = client.parent_account.city
+                client.parent_account_state = client.parent_account.state
+                client.parent_account_zip = client.parent_account.zip_code
             elif client:
                 client.parent_account_name = None
+                client.parent_account_address = None
+                client.parent_account_city = None
+                client.parent_account_state = None
+                client.parent_account_zip = None
                 
             return client
         except Exception as e:

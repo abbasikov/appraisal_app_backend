@@ -39,6 +39,23 @@ def upload_template(
     if current_user.role not in [UserRole.ADMIN, UserRole.EDITOR]:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     
+    # Validate file size (max 10MB)
+    from app.core.config import settings
+    max_size = settings.MAX_FILE_SIZE
+    
+    # Check file size using the file object
+    if hasattr(file.file, 'seek') and hasattr(file.file, 'tell'):
+        current_pos = file.file.tell()
+        file.file.seek(0, 2)  # Seek to end
+        file_size = file.file.tell()
+        file.file.seek(current_pos)  # Seek back
+        
+        if file_size > max_size:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum size is {max_size / (1024*1024):.0f}MB, got {file_size / (1024*1024):.2f}MB"
+            )
+    
     template = TemplateService.upload_template(
         db, file, appraisal_type, description, current_user.id
     )
