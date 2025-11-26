@@ -217,6 +217,7 @@ class TemplateService:
             # Look up precious metals prices based on effective_date, to be used
             # for template placeholders like gold_price, silver_price, plat_price.
             effective_date = project.effective_date
+            logger.info(f"🌟🌟🌟 METAL PRICE SECTION - effective_date={effective_date} (type: {type(effective_date).__name__})")
 
             def _fetch_metals_from_external(date_):
                 """Fetch historical metal prices for the exact date from MetalpriceAPI.
@@ -229,20 +230,26 @@ class TemplateService:
                     or settings.METALPRICE_API_KEY
                 )
                 
-                logger.info(f"🔍 Checking for METALPRICE_API_KEY...")
+                logger.info(f"� ========== METAL PRICE FETCH START ==========")
+                logger.info(f"�🔍 Checking for METALPRICE_API_KEY...")
                 logger.info(f"   From env: {os.environ.get('METALPRICE_API_KEY')[:10] if os.environ.get('METALPRICE_API_KEY') else 'NOT SET'}")
                 logger.info(f"   From settings: {settings.METALPRICE_API_KEY[:10] if settings.METALPRICE_API_KEY else 'NOT SET'}")
+                logger.info(f"   Using API key: {api_key[:10] if api_key else 'NONE'}...")
                 
                 if not api_key or not date_:
                     logger.warning(f"❌ MetalpriceAPI key not set or effective_date missing; skipping external metals fetch")
-                    logger.warning(f"   api_key: {bool(api_key)}, date_: {bool(date_)}")
+                    logger.warning(f"   api_key present: {bool(api_key)}, date_ present: {bool(date_)}")
+                    logger.info(f"💰 ========== METAL PRICE FETCH END (SKIPPED) ==========\n")
                     return {}
 
                 try:
                     try:
                         date_str = date_.strftime("%Y-%m-%d")
-                    except Exception:
+                    except Exception as date_error:
+                        logger.warning(f"⚠️  Could not format date with strftime: {date_error}")
                         date_str = str(date_)
+                    
+                    logger.info(f"📅 Effective date for metal prices: {date_str}")
 
                     # MetalpriceAPI historical endpoint: /v1/YYYY-MM-DD
                     url = f"https://api.metalpriceapi.com/v1/{date_str}"
@@ -251,40 +258,68 @@ class TemplateService:
                         "base": "USD",
                         "currencies": "XAU,XAG,XPT",
                     }
-                    logger.info(f"🌐 Fetching metals prices from {url}")
+                    
+                    logger.info(f"🌐 SENDING API REQUEST:")
+                    logger.info(f"   URL: {url}")
+                    logger.info(f"   Params: base={params['base']}, currencies={params['currencies']}")
+                    logger.info(f"   Timeout: 10 seconds")
+                    
                     resp = requests.get(url, params=params, timeout=10)
+                    
+                    logger.info(f"✅ API RESPONSE RECEIVED:")
+                    logger.info(f"   Status Code: {resp.status_code}")
+                    logger.info(f"   Response Time: {resp.elapsed.total_seconds():.2f}s")
+                    
                     resp.raise_for_status()
                     data = resp.json()
-                    logger.info(f"✅ Metals API response received: {data}")
+                    
+                    logger.info(f"📦 Parsed JSON Response: {data}")
 
                     if not data.get("success", True):
-                        logger.warning(f"❌ Metals API returned unsuccessful response: {data}")
+                        logger.warning(f"❌ Metals API returned unsuccessful response")
+                        logger.warning(f"   Success flag: {data.get('success', True)}")
+                        logger.warning(f"   Full response: {data}")
+                        logger.info(f"💰 ========== METAL PRICE FETCH END (FAILED) ==========\n")
                         return {}
 
                     rates = data.get("rates", {}) or {}
+                    logger.info(f"💱 Raw Rates from API: {rates}")
 
                     # MetalpriceAPI returns both metal-per-USD (XAU, XAG, XPT) and
                     # USD-per-ounce synthetic pairs (USDXAU, USDXAG, USDXPT).
                     # We prefer USDXAU/USDXAG/USDXPT when present; otherwise we
                     # invert XAU/XAG/XPT to get USD per ounce.
                     def _extract_usd_per_oz(symbol: str, usd_symbol: str):
+                        logger.debug(f"   Extracting {symbol}: checking for {usd_symbol} or {symbol}")
                         if usd_symbol in rates:
-                            return rates[usd_symbol]
+                            value = rates[usd_symbol]
+                            logger.debug(f"      Found {usd_symbol} = {value}")
+                            return value
                         value = rates.get(symbol)
                         try:
                             if value is None:
+                                logger.debug(f"      {symbol} not found in rates")
                                 return None
                             value_f = float(value)
                             if value_f == 0:
+                                logger.debug(f"      {symbol} = 0 (invalid)")
                                 return None
-                            return 1.0 / value_f
-                        except Exception:
+                            inverted = 1.0 / value_f
+                            logger.debug(f"      {symbol} = {value}, inverted = {inverted}")
+                            return inverted
+                        except Exception as extract_error:
+                            logger.debug(f"      Error extracting {symbol}: {extract_error}")
                             return None
 
+                    logger.info(f"🔧 EXTRACTING METAL PRICES:")
                     result = {}
                     gold_price = _extract_usd_per_oz("XAU", "USDXAU")
                     silver_price = _extract_usd_per_oz("XAG", "USDXAG")
                     platinum_price = _extract_usd_per_oz("XPT", "USDXPT")
+
+                    logger.info(f"💛 Gold Price (XAU/USDXAU): ${gold_price:.2f}/oz" if gold_price else f"💛 Gold Price: NOT FOUND")
+                    logger.info(f"⚪ Silver Price (XAG/USDXAG): ${silver_price:.2f}/oz" if silver_price else f"⚪ Silver Price: NOT FOUND")
+                    logger.info(f"🔘 Platinum Price (XPT/USDXPT): ${platinum_price:.2f}/oz" if platinum_price else f"🔘 Platinum Price: NOT FOUND")
 
                     if gold_price is not None:
                         result[MetalType.GOLD] = gold_price
@@ -293,7 +328,11 @@ class TemplateService:
                     if platinum_price is not None:
                         result[MetalType.PLATINUM] = platinum_price
 
+                    logger.info(f"✅ PRICES EXTRACTED: {len(result)} metal(s) found")
+                    
                     # Cache in DB for this exact date
+                    logger.info(f"💾 Caching metal prices in database...")
+                    cached_count = 0
                     for metal_type, price in result.items():
                         if price is None:
                             continue
@@ -310,12 +349,25 @@ class TemplateService:
                                 source="metals_api",
                                 is_manual_override=False,
                             ))
-                    # Flush but don't commit; outer transaction will commit
+                            logger.debug(f"   Caching {metal_type.value}: ${price:.2f}/oz for {date_str}")
+                            cached_count += 1
+                        else:
+                            logger.debug(f"   {metal_type.value} already cached for {date_str}, skipping")
+                    
                     db.flush()
+                    logger.info(f"✅ {cached_count} metal price(s) cached in database")
+                    logger.info(f"💰 ========== METAL PRICE FETCH SUCCESS ==========\n")
 
                     return result
+                except requests.exceptions.RequestException as req_error:
+                    logger.error(f"❌ REQUEST ERROR: {type(req_error).__name__}: {req_error}")
+                    logger.info(f"💰 ========== METAL PRICE FETCH END (ERROR) ==========\n")
+                    return {}
                 except Exception as e:
-                    logger.warning(f"Error fetching metals prices from external API: {e}")
+                    logger.error(f"❌ UNEXPECTED ERROR: {type(e).__name__}: {e}")
+                    import traceback
+                    logger.error(f"   Traceback: {traceback.format_exc()}")
+                    logger.info(f"💰 ========== METAL PRICE FETCH END (ERROR) ==========\n")
                     return {}
 
             external_prices_cache: Dict[MetalType, float] = {}
@@ -330,9 +382,13 @@ class TemplateService:
                 - If still missing or no effective_date, fall back to latest available
                   price in DB.
                 """
+                metal_emoji = {"GOLD": "💛", "SILVER": "⚪", "PLATINUM": "🔘"}.get(metal_type.value, "💰")
+                logger.info(f"{metal_emoji} ========== RETRIEVING {metal_type.value.upper()} PRICE ==========")
+                
                 query = db.query(MetalsPrice).filter(MetalsPrice.metal_type == metal_type)
 
                 if effective_date:
+                    logger.info(f"{metal_emoji} Looking for exact price on {effective_date.strftime('%Y-%m-%d')}")
                     # Exact match for this date in DB
                     existing_exact = (
                         query.filter(MetalsPrice.price_date == effective_date)
@@ -340,22 +396,45 @@ class TemplateService:
                         .first()
                     )
                     if existing_exact:
+                        logger.info(f"{metal_emoji} ✅ Found in DB: ${existing_exact.price_per_oz:.2f}/oz (cached on {existing_exact.created_at.strftime('%Y-%m-%d %H:%M:%S')})")
+                        logger.info(f"{metal_emoji} ========== {metal_type.value.upper()} PRICE RETRIEVED (DB) ==========\n")
                         return existing_exact.price_per_oz
 
                     # If not cached yet, fetch once from external API for this date
                     if not external_prices_cache:
+                        logger.info(f"{metal_emoji} Not found in DB, fetching from external API...")
                         external_prices_cache.update(_fetch_metals_from_external(effective_date))
 
                     if metal_type in external_prices_cache:
-                        return external_prices_cache[metal_type]
+                        price = external_prices_cache[metal_type]
+                        logger.info(f"{metal_emoji} ✅ Got from API: ${price:.2f}/oz")
+                        logger.info(f"{metal_emoji} ========== {metal_type.value.upper()} PRICE RETRIEVED (API) ==========\n")
+                        return price
 
                 # Fallback: latest available price regardless of date
+                logger.info(f"{metal_emoji} Falling back to latest available price in database...")
                 latest_any = query.order_by(MetalsPrice.price_date.desc()).first()
-                return latest_any.price_per_oz if latest_any else None
+                if latest_any:
+                    logger.info(f"{metal_emoji} ✅ Using latest available: ${latest_any.price_per_oz:.2f}/oz on {latest_any.price_date.strftime('%Y-%m-%d')}")
+                    logger.info(f"{metal_emoji} ========== {metal_type.value.upper()} PRICE RETRIEVED (LATEST) ==========\n")
+                    return latest_any.price_per_oz
+                
+                logger.warning(f"{metal_emoji} ❌ NO PRICE FOUND for {metal_type.value}")
+                logger.info(f"{metal_emoji} ========== {metal_type.value.upper()} PRICE RETRIEVAL FAILED ==========\n")
+                return None
 
+            logger.info(f"🌟🌟🌟 ABOUT TO CALL _get_metal_price() - effective_date={effective_date}")
+            logger.info(f"💰 ========== FETCHING ALL METAL PRICES FOR REPORT ==========")
             gold_price = _get_metal_price(MetalType.GOLD)
+            logger.info(f"🌟 Got gold_price={gold_price}")
             silver_price = _get_metal_price(MetalType.SILVER)
+            logger.info(f"🌟 Got silver_price={silver_price}")
             platinum_price = _get_metal_price(MetalType.PLATINUM)
+            logger.info(f"🌟 Got platinum_price={platinum_price}")
+            logger.info(f"💰 ========== ALL METAL PRICES FETCHED ==========")
+            logger.info(f"   💛 Gold:     {f'${gold_price:.2f}/oz' if gold_price else 'NOT AVAILABLE'}")
+            logger.info(f"   ⚪ Silver:   {f'${silver_price:.2f}/oz' if silver_price else 'NOT AVAILABLE'}")
+            logger.info(f"   🔘 Platinum: {f'${platinum_price:.2f}/oz' if platinum_price else 'NOT AVAILABLE'}\n")
 
             project_data = {
                 "project_name": project.project_name,

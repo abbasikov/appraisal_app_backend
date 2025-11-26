@@ -34,6 +34,8 @@ class Project(Base):
     report_date = Column(Date)
     effective_date = Column(Date)  # Effective date for the appraisal
     appraisal_location = Column(String)  # Location where appraisal takes place
+    estate_of = Column(String)  # Name of the estate (for ESTATE appraisals)
+    date_of_death = Column(Date)  # Date of death (for ESTATE appraisals)
     dropbox_folder_link = Column(String)
     dropbox_folder_id = Column(String)
     notification_email = Column(String)  # Email for import notifications
