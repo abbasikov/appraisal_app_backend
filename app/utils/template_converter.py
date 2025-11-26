@@ -3403,22 +3403,9 @@ def _add_watermark(doc: Document):
                     </w:pPr>
                     <w:r>
                         <w:pict>
-                            <v:shape id="Watermark{section_idx}" type="#_x0000_t136"
-                                style="position:absolute;left:0;top:0;width:468pt;height:200pt;z-index:-251654144;mso-position-horizontal:center;mso-position-vertical:center;mso-position-horizontal-relative:page;mso-position-vertical-relative:page;mso-wrap-edited:f"
-                                rotation="315" fillcolor="#d3d3d3" stroked="f">
-                                <v:textbox style="mso-fit-shape-to-text:t">
-                                    <w:txbxContent>
-                                        <w:p>
-                                            <w:r>
-                                                <w:rPr>
-                                                    <w:color w:val="D3D3D3"/>
-                                                    <w:sz w:val="120"/>
-                                                </w:rPr>
-                                                <w:t>DRAFT</w:t>
-                                            </w:r>
-                                        </w:p>
-                                    </w:txbxContent>
-                                </v:textbox>
+                            <v:shape id="PowerPlusWaterMarkObject{section_idx}" o:allowincell="false" type="#_x0000_t136" class="PowerPlusWaterMarkObject" style="position:absolute;left:0;top:0;width:550pt;height:350pt;z-index:-251654144;mso-position-horizontal:center;mso-position-vertical:center;mso-position-horizontal-relative:page;mso-position-vertical-relative:page;rotation:0;opacity:.60;mso-opacity:.60" o:opacity=".60" fillcolor="#c0c0c0" stroked="f">
+                                <o:allowincell v:val="false"/>
+                                <v:textpath style="font-family:'Calibri';font-size:2em;font-weight:bold" string="DRAFT"/>
                             </v:shape>
                         </w:pict>
                     </w:r>
