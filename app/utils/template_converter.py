@@ -289,8 +289,10 @@ def _ensure_headers_footers_replaced(doc: Document, field_mappings: Dict, projec
         'attorney_email': client_data.get('attorney_email', ''),
         'death_date': _format_date(client_data.get('date_of_death', '')),
         'project_name': project_data.get('project_name', 'Appraisal Project'),
-        'estate_of': client_data.get('name', ''),
-            'law_firm': account_data.get('name', ''),  # law_firm uses name from account table
+        'estate_of': project_data.get('estate_of', ''),  # Estate name from project table (not from client)
+        'DOD': _format_date(project_data.get('date_of_death', '')),  # Date of death from project
+        'date_of_death': _format_date(project_data.get('date_of_death', '')),  # Alias for DOD
+        'law_firm': account_data.get('name', ''),  # law_firm uses name from account table
         **inspection_placeholders
     }
     
@@ -565,11 +567,10 @@ def _final_placeholder_check(doc: Document, field_mappings: Dict, project_data: 
         'attorney_email': client_data.get('attorney_email', ''),
         'death_date': _format_date(client_data.get('date_of_death', '')),
         'project_name': project_data.get('project_name', 'Appraisal Project'),
-        'estate_of': client_data.get('name', ''),
+        'estate_of': project_data.get('estate_of', ''),  # Estate name from project table (not from client)
         'DOD': _format_date(project_data.get('date_of_death', '')),  # Date of death from project
-        'date_of_death': _format_date(project_data.get('date_of_death', '')),  # Alias
-        'estate_of_project': project_data.get('estate_of', ''),  # Estate name from project
-            'law_firm': account_data.get('name', ''),  # law_firm uses name from account table
+        'date_of_death': _format_date(project_data.get('date_of_death', '')),  # Alias for DOD
+        'law_firm': account_data.get('name', ''),  # law_firm uses name from account table
         **inspection_placeholders
     }
     
@@ -1632,12 +1633,11 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
         'attorney_phone': client_data.get('attorney_phone', ''),
         'attorney_email': client_data.get('attorney_email', ''),
         'case_name': client_data.get('case_name', 'Appraisal'),
-        'estate_of': client_data.get('name', ''),
         
         # Estate-specific fields (from project table, not client table)
+        'estate_of': project_data.get('estate_of', ''),  # Estate name from project table
         'DOD': _format_date(project_data.get('date_of_death', '')),  # Date of death from project
-        'date_of_death': _format_date(project_data.get('date_of_death', '')),  # Alias
-        'estate_of_project': project_data.get('estate_of', ''),  # Estate name from project
+        'date_of_death': _format_date(project_data.get('date_of_death', '')),  # Alias for DOD
         
         # Account fields
         'law_firm': account_data.get('name', ''),  # law_firm uses name from account table
