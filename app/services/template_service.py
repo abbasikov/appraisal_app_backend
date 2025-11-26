@@ -446,6 +446,9 @@ class TemplateService:
                 "effective_date": str(project.effective_date) if project.effective_date else "",
                 "appraisal_location": project.appraisal_location if project.appraisal_location else "",
                 "total_value": str(total_value),
+                # Estate-specific fields from project table
+                "estate_of": project.estate_of if project.estate_of else "",
+                "date_of_death": str(project.date_of_death) if project.date_of_death else "",
                 # Metals prices (numeric, will be formatted in template_converter)
                 "gold_price": float(gold_price) if gold_price is not None else None,
                 "silver_price": float(silver_price) if silver_price is not None else None,
