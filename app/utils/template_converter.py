@@ -3300,58 +3300,71 @@ def _add_summary_table(doc: Document, items: list, item_type: str, project_data:
     logger.info("✅ Removed old template table")
     
     # Step 4 & 5: Add page break after summary table and clean up trailing empties
-    # Only for non-image_based templates; image-based templates already manage
-    # end-of-document page breaks in _handle_appraisal_items.
-    if not is_image_based:
-        summary_tbl_index = list(parent).index(new_tbl_element)
-        break_after_summary = OxmlElement('w:p')
-        break_run_after_summary = OxmlElement('w:r')
-        break_element_after_summary = OxmlElement('w:br')
-        break_element_after_summary.set(qn('w:type'), 'page')
-        break_run_after_summary.append(break_element_after_summary)
-        break_after_summary.append(break_run_after_summary)
-        parent.insert(summary_tbl_index + 1, break_after_summary)
-        logger.info("✅ Added page break after summary table")
+    # Applied to ALL templates (image-based and non-image-based)
+    summary_tbl_index = list(parent).index(new_tbl_element)
+    break_after_summary = OxmlElement('w:p')
+    break_run_after_summary = OxmlElement('w:r')
+    break_element_after_summary = OxmlElement('w:br')
+    break_element_after_summary.set(qn('w:type'), 'page')
+    break_run_after_summary.append(break_element_after_summary)
+    break_after_summary.append(break_run_after_summary)
+    parent.insert(summary_tbl_index + 1, break_after_summary)
+    logger.info("✅ Added page break after summary table")
 
-        # Aggressively clean up ALL empty lines/spaces after the page break until we find text content
-        cleanup_index = summary_tbl_index + 2  # Start after the page break we just added
-        elements_cleaned = 0
-        max_cleanup_after = 100  # Increased safety limit to handle more elements
-        cleanup_count_after = 0
-        
-        while cleanup_index < len(list(parent)) and cleanup_count_after < max_cleanup_after:
-            # Check if we're at the end of the document
-            if cleanup_index >= len(list(parent)):
-                logger.info("   → Reached end of document, stopping cleanup")
-                break
-                
-            element_to_check = list(parent)[cleanup_index]
+    # Aggressively clean up ALL empty lines/spaces/page breaks after the page break until we find text content
+    cleanup_index = summary_tbl_index + 2  # Start after the page break we just added
+    elements_cleaned = 0
+    max_cleanup_after = 100  # Increased safety limit to handle more elements
+    cleanup_count_after = 0
+    
+    while cleanup_index < len(list(parent)) and cleanup_count_after < max_cleanup_after:
+        # Check if we're at the end of the document
+        if cleanup_index >= len(list(parent)):
+            logger.info("   → Reached end of document, stopping cleanup")
+            break
             
-            # Check if this element should be removed
-            should_remove_after = False
-            if element_to_check.tag.endswith('}p'):  # Paragraph
-                full_text = ''.join(element_to_check.itertext()) if hasattr(element_to_check, 'itertext') else ''
-                
-                # Remove if:
-                # 1. It's completely empty
-                # 2. It only contains whitespace (spaces, tabs, newlines, etc.)
-                # 3. It has no text content (just formatting)
-                if not full_text or not full_text.strip() or full_text.isspace():
-                    should_remove_after = True
-                    logger.info(f"   → Cleaning up empty/whitespace paragraph after summary table")
-            
-            if should_remove_after:
-                parent.remove(element_to_check)
-                elements_cleaned += 1
-                cleanup_count_after += 1
-                # Don't increment cleanup_index since we removed an element
-            else:
-                # Found actual content, stop cleaning
-                logger.info(f"   → Found content after summary table, stopping cleanup")
-                break
+        element_to_check = list(parent)[cleanup_index]
         
-        if elements_cleaned > 0:
-            logger.info(f"✅ Cleaned up {elements_cleaned} empty element(s) after summary table")
+        # Check if this element should be removed
+        should_remove_after = False
+        if element_to_check.tag.endswith('}p'):  # Paragraph
+            full_text = ''.join(element_to_check.itertext()) if hasattr(element_to_check, 'itertext') else ''
+            
+            # Check if paragraph contains a page break
+            has_page_break = False
+            for child in element_to_check.iter():
+                if 'br' in str(child.tag).lower():
+                    # Check if it's a page break
+                    break_type = child.get(qn('w:type'), '')
+                    if break_type == 'page':
+                        has_page_break = True
+                        break
+            
+            # Remove if:
+            # 1. It's completely empty
+            # 2. It only contains whitespace (spaces, tabs, newlines, etc.)
+            # 3. It has no text content (just formatting)
+            # 4. It contains a page break
+            if not full_text or not full_text.strip() or full_text.isspace() or has_page_break:
+                should_remove_after = True
+                if has_page_break:
+                    logger.info(f"   → Removing paragraph with page break after summary table")
+                else:
+                    logger.info(f"   → Removing empty/whitespace paragraph after summary table")
+        
+        if should_remove_after:
+            parent.remove(element_to_check)
+            elements_cleaned += 1
+            cleanup_count_after += 1
+            # Don't increment cleanup_index since we removed an element
+        else:
+            # Found actual content, stop cleaning
+            logger.info(f"   → Found content after summary table, stopping cleanup")
+            break
+    
+    if elements_cleaned > 0:
+        logger.info(f"✅ Cleaned up {elements_cleaned} empty element(s) and page break(s) after summary table")
+
     
     logger.info(f"✅ Summary section complete: {total_items} items, ${total_value:,.2f} total value")
 
