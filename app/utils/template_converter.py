@@ -1566,8 +1566,9 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
     # IMPORTANT: Don't check for raw price values in project_data directly
     # They should always be formatted via field_mappings
     
-    # Check if the field is directly in project_data first (but skip metal prices)
-    if field_name in project_data and field_name not in ['gold_price', 'silver_price', 'plat_price']:
+    # Check if the field is directly in project_data first (but skip metal prices and total_value which needs formatting)
+    # Also skip date fields to ensure they go through _format_date
+    if field_name in project_data and field_name not in ['gold_price', 'silver_price', 'plat_price', 'total_value', 'inspection_date', 'report_date', 'effective_date']:
         logger.info(f"Found {field_name} directly in project_data: {project_data[field_name]}")
         return project_data[field_name]
     

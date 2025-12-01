@@ -46,6 +46,7 @@ class ProjectService:
                 appraisal_location=project.appraisal_location.strip() if project.appraisal_location else None,
                 estate_of=project.estate_of.strip() if project.estate_of else None,  # Estate name for ESTATE appraisals
                 date_of_death=project.date_of_death,  # Date of death for ESTATE appraisals
+                address_letter_to=project.address_letter_to.strip() if project.address_letter_to else None,
                 template_id=project.template_id,
                 notes=project.notes.strip() if project.notes else None
             )
