@@ -79,12 +79,14 @@ class ClientService:
             for client in clients:
                 if client.parent_account:
                     client.parent_account_name = client.parent_account.name
+                    client.parent_account_type = client.parent_account.account_type.value if hasattr(client.parent_account.account_type, 'value') else client.parent_account.account_type
                     client.parent_account_address = client.parent_account.address
                     client.parent_account_city = client.parent_account.city
                     client.parent_account_state = client.parent_account.state
                     client.parent_account_zip = client.parent_account.zip_code
                 else:
                     client.parent_account_name = None
+                    client.parent_account_type = None
                     client.parent_account_address = None
                     client.parent_account_city = None
                     client.parent_account_state = None
@@ -106,12 +108,14 @@ class ClientService:
             
             if client and client.parent_account:
                 client.parent_account_name = client.parent_account.name
+                client.parent_account_type = client.parent_account.account_type.value if hasattr(client.parent_account.account_type, 'value') else client.parent_account.account_type
                 client.parent_account_address = client.parent_account.address
                 client.parent_account_city = client.parent_account.city
                 client.parent_account_state = client.parent_account.state
                 client.parent_account_zip = client.parent_account.zip_code
             elif client:
                 client.parent_account_name = None
+                client.parent_account_type = None
                 client.parent_account_address = None
                 client.parent_account_city = None
                 client.parent_account_state = None
