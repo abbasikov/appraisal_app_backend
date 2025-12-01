@@ -31,6 +31,7 @@ class ProjectCreate(BaseModel):
     appraisal_location: Optional[str] = None
     estate_of: Optional[str] = None  # Name of the estate (for ESTATE appraisals)
     date_of_death: Optional[date] = None  # Date of death (for ESTATE appraisals)
+    address_letter_to: str  # REQUIRED: person to send letter to
     assigned_user_id: Optional[int] = None
     account_id: Optional[int] = None  # Account/Law firm associated with project
     template_id: Optional[int] = None
@@ -48,6 +49,7 @@ class ProjectUpdate(BaseModel):
     appraisal_location: Optional[str] = None
     estate_of: Optional[str] = None  # Name of the estate (for ESTATE appraisals)
     date_of_death: Optional[date] = None  # Date of death (for ESTATE appraisals)
+    address_letter_to: Optional[str] = None  # Person to send letter to
     assigned_user_id: Optional[int] = None
     account_id: Optional[int] = None  # Account/Law firm associated with project
     template_id: Optional[int] = None
@@ -69,6 +71,7 @@ class ProjectResponse(BaseModel):
     appraisal_location: Optional[str] = None
     estate_of: Optional[str] = None  # Name of the estate (for ESTATE appraisals)
     date_of_death: Optional[date] = None  # Date of death (for ESTATE appraisals)
+    address_letter_to: Optional[str] = None  # Person to send letter to
     assigned_user_id: Optional[int] = None
     assigned_user_name: Optional[str] = None  # From joined user table
     status: str

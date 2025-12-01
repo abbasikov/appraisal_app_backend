@@ -7,7 +7,7 @@ ITEM_DESCRIPTION_TEMPLATES = {
 Artist Nationality: 
 Artist Life Dates: 
 Title of Work: 
-Date of Work (Month): 
+Date of Work: 
 Medium: 
 Artwork Dimensions: 
 Frame Dimensions: 

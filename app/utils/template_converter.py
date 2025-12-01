@@ -1384,7 +1384,7 @@ def _handle_appraisal_items(doc: Document, project_data: Dict):
                     value_label = "Replacement Value"
                 run = p.add_run(value_label)
                 run = p.add_run("\t")
-                run = p.add_run(f"${appraised_value:.2f}")
+                run = p.add_run(f"${appraised_value:,.2f}")  # Dollar sign with commas
 
                 
                 # Priority: 2 items per page, then page break
@@ -1518,7 +1518,7 @@ def _handle_appraisal_items(doc: Document, project_data: Dict):
                 fmv_text = "Fair Market Value"
                 if _is_replacement_domain(project_data):
                     fmv_text = "Replacement Value"
-                price_text = f"${appraised_value:.2f}"
+                price_text = f"${appraised_value:,.2f}"  # Dollar sign with commas
                 
                 # Calculate dots needed (approximate)
                 dots_needed = max(1, 60 - len(fmv_text) - len(price_text))
@@ -1618,7 +1618,7 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
         'appraisal_type': project_data.get('appraisal_type', ''),
         'address': full_address,
         'death_date': _format_date(client_data.get('date_of_death')),
-        'total_value': f"${project_data.get('total_value', '0.00')}",
+        'total_value': f"${float(project_data.get('total_value', 0)):,.2f}",
         'gold_price': _format_price(gold_price_value),
         'silver_price': _format_price(silver_price_value),
         'plat_price': _format_price(plat_price_value),
@@ -1638,6 +1638,7 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
         'estate_of': project_data.get('estate_of', ''),  # Estate name from project table
         'DOD': _format_date(project_data.get('date_of_death', '')),  # Date of death from project
         'date_of_death': _format_date(project_data.get('date_of_death', '')),  # Alias for DOD
+        'address_letter_to': project_data.get('address_letter_to', ''),  # Address to send letter to
         
         # Account fields
         'law_firm': account_data.get('name', ''),  # law_firm uses name from account table
@@ -1648,7 +1649,7 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
         # Appraisal summary fields
         'item_count': str(len(appraisal_items)),
         'photo_count': str(len(project_data.get('all_project_photos', []))),
-        'market_value': f"${appraisal_items[0].get('appraised_value', 0):.2f}" if appraisal_items else '$0.00',
+        'market_value': f"${appraisal_items[0].get('appraised_value', 0):,.2f}" if appraisal_items else '$0.00',
         
         # Static appraiser fields
         'appraiser_name': 'Andrew Kravit',
@@ -1666,7 +1667,7 @@ def _get_field_value_from_project(field_name: str, project_data: Dict) -> str:
         item_num = i + 1
         field_mappings.update({
             f'item_{item_num}_description': item.get('description', ''),
-            f'item_{item_num}_value': f"${item.get('appraised_value', 0):.2f}",
+            f'item_{item_num}_value': f"${item.get('appraised_value', 0):,.2f}",
             f'item_{item_num}_room': item.get('room_area', ''),
             f'item_{item_num}_floor': item.get('floor_building', ''),
             f'item_{item_num}_type': item.get('item_type', ''),
@@ -3270,7 +3271,7 @@ def _add_summary_table(doc: Document, items: list, item_type: str, project_data:
     # Row 2 (Values): Item count | Total value
     value_cells = new_summary_table.rows[1].cells
     value_cells[0].text = str(total_items)
-    value_cells[1].text = str(int(total_value))  # No dollar sign, no decimals, just number
+    value_cells[1].text = f"${total_value:,.2f}"  # Dollar sign with commas and 2 decimals
     
     # Format value row with 14pt font, centered
     for cell in value_cells:
