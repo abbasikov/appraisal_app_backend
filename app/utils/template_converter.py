@@ -2334,12 +2334,10 @@ def _handle_content_table(doc: Document, project_data: Dict):
     logger.info("📦 Rendering content inventory table from JSONB attributes (room-by-room)")
 
     # Get full content items (preserve item metadata like photos)
+    # For Contents template, include ALL items regardless of item_type
+    # This allows manually changed types (Jewelry, Artwork, etc.) to appear in the report
     appraisal_items = project_data.get('appraisal_items', [])
-    content_items = []
-    for item in appraisal_items:
-        item_type = (item.get('item_type') or '').lower()
-        if item_type in ['content', 'contents', 'inventory']:
-            content_items.append(item)
+    content_items = appraisal_items  # Include all items, no filtering by type
 
     if not content_items:
         logger.warning("No content items found for content table")
