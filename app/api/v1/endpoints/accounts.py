@@ -177,3 +177,50 @@ def create_account_client(
         raise HTTPException(status_code=400, detail="Failed to create client")
     
     return ClientResponse.model_validate(client)
+@router.get("/{account_id}/clients-by-projects")
+def get_account_clients_by_projects(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all clients for an account based on project relationships.
+    Returns clients with their associated project names for this account.
+    A client can appear under multiple accounts if they have projects with different accounts.
+    """
+    from app.models.project import Project
+    from app.models.client import Client
+    
+    # Query for all projects with this account_id, joined with clients
+    results = db.query(
+        Client,
+        Project.project_name,
+        Project.id.label('project_id')
+    ).join(
+        Project, Client.id == Project.client_id
+    ).filter(
+        Project.account_id == account_id
+    ).all()
+    
+    # Group clients by client_id with their project names
+    clients_dict = {}
+    for client, project_name, project_id in results:
+        if client.id not in clients_dict:
+            clients_dict[client.id] = {
+                'id': client.id,
+                'name': client.name,
+                'email': client.email,
+                'phone': client.phone,
+                'address': client.address,
+                'city': client.city,
+                'state': client.state,
+                'zip_code': client.zip_code,
+                'is_active': client.is_active,
+                'case_name': client.case_name,
+                'projects': []
+            }
+        clients_dict[client.id]['projects'].append({
+            'id': project_id,
+            'name': project_name
+        })
+    
+    return list(clients_dict.values())

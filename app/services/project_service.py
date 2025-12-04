@@ -32,6 +32,12 @@ class ProjectService:
             # Determine account_id: use provided value or fallback to client's parent_account_id
             account_id = project.account_id or client.parent_account_id
             
+            # Update client's parent_account_id if project has an account_id
+            # This establishes the client-account association through the project
+            if project.account_id:
+                client.parent_account_id = project.account_id
+                db.commit()
+            
             db_project = Project(
                 project_name=project.project_name.strip(),
                 client_id=project.client_id,
