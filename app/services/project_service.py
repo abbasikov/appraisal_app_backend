@@ -135,6 +135,7 @@ class ProjectService:
         result = db.query(
             Project,
             Client.name.label('client_name'),
+            Client.case_name.label('client_case_name'),
             User.first_name.label('user_first_name'),
             User.last_name.label('user_last_name')
         ).join(Client, Project.client_id == Client.id)\
@@ -144,18 +145,22 @@ class ProjectService:
         if not result:
             return None
         
-        project, client_name, user_first, user_last = result
+        project, client_name, client_case_name, user_first, user_last = result
         
         return {
             "id": project.id,
             "project_name": project.project_name,
             "client_id": project.client_id,
             "client_name": client_name,
+            "case_name": client_case_name,
             "case_number": project.case_number,
             "appraisal_type": project.appraisal_type.value,
             "purpose": project.purpose,
             "inspection_date": project.inspection_date,
             "report_date": project.report_date,
+            "estate_of": project.estate_of,
+            "date_of_death": project.date_of_death,
+            "address_letter_to": project.address_letter_to,
             "assigned_user_id": project.assigned_user_id,
             "assigned_user_name": f"{user_first} {user_last}" if user_first else None,
             "status": project.status.value,
