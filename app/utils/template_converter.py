@@ -2060,24 +2060,30 @@ def _parse_description_for_coin_wine(description: str, item_type: str) -> tuple:
     
     try:
         if is_coin:
-            # Parse: "Quantity: X" and "Value Per Coin $: Y"
+            # Parse: "Quantity: X" and "Value Per Coin $: Y" (with optional $ sign)
             quantity_match = re.search(r'Quantity:\s*(\d+(?:\.\d+)?)', description, re.IGNORECASE)
-            price_match = re.search(r'Value Per Coin \$:\s*(\d+(?:\.\d+)?)', description, re.IGNORECASE)
+            # Updated pattern to handle optional $ sign and commas: "$25.00" or "25.00" or "$1,250.50"
+            price_match = re.search(r'Value Per Coin \$:\s*\$?\s*([\d,]+(?:\.\d+)?)', description, re.IGNORECASE)
             
             if quantity_match:
                 quantity = float(quantity_match.group(1))
             if price_match:
-                price = float(price_match.group(1))
+                # Strip $ and commas before converting to float
+                price_str = price_match.group(1).replace('$', '').replace(',', '')
+                price = float(price_str)
                 
         elif is_wine:
-            # Parse: "Quantity: X" and "Per Bottle Price: Y"
+            # Parse: "Quantity: X" and "Per Bottle Price: Y" (with optional $ sign)
             quantity_match = re.search(r'Quantity:\s*(\d+(?:\.\d+)?)', description, re.IGNORECASE)
-            price_match = re.search(r'Per Bottle Price:\s*(\d+(?:\.\d+)?)', description, re.IGNORECASE)
+            # Updated pattern to handle optional $ sign and commas: "$100" or "100" or "$1,250.50"
+            price_match = re.search(r'Per Bottle Price:\s*\$?\s*([\d,]+(?:\.\d+)?)', description, re.IGNORECASE)
             
             if quantity_match:
                 quantity = float(quantity_match.group(1))
             if price_match:
-                price = float(price_match.group(1))
+                # Strip $ and commas before converting to float
+                price_str = price_match.group(1).replace('$', '').replace(',', '')
+                price = float(price_str)
     
     except Exception as e:
         logger.error(f"Error parsing description: {str(e)}")
@@ -2289,12 +2295,22 @@ def _handle_coin_table(doc: Document, project_data: Dict):
             row_cells[2].text = coin_desc_text
             row_cells[3].text = condition_text
             
-            # Auto-calculate and format price (quantity * price_per_coin)
-            total_value = quantity * price_per_coin if quantity > 0 and price_per_coin > 0 else 0
-            try:
-                row_cells[4].text = f"${total_value:,.2f}" if total_value > 0 else ''
-            except:
-                row_cells[4].text = ''
+            # Use manually set appraised_value if present, otherwise auto-calculate
+            # This allows users to manually override the calculated value
+            manual_value = coin.get('appraised_value')
+            if manual_value is not None and manual_value != '':
+                # User has manually set a value - use it
+                try:
+                    row_cells[4].text = f"${float(manual_value):,.2f}"
+                except:
+                    row_cells[4].text = ''
+            else:
+                # Auto-calculate and format price (quantity * price_per_coin)
+                total_value = quantity * price_per_coin if quantity > 0 and price_per_coin > 0 else 0
+                try:
+                    row_cells[4].text = f"${total_value:,.2f}" if total_value > 0 else ''
+                except:
+                    row_cells[4].text = ''
             
             # Format cells
             for cell in row_cells:
@@ -2381,29 +2397,13 @@ def _handle_content_table(doc: Document, project_data: Dict):
         for index, item in enumerate(content_items):
             attributes = item.get('attributes', {}) or {}
 
-            # Prefer the short JSON description field for contents
-            short_desc = (attributes.get('description') or '').strip()
-            if not short_desc:
-                # Fallback: try to parse the first 'Description:' line from item.description
-                full_desc = item.get('description') or ''
-                parsed_desc = ''
-                has_description_label = False
-                for line in full_desc.splitlines():
-                    stripped = line.strip()
-                    if stripped.lower().startswith('description:'):
-                        has_description_label = True
-                        parsed_desc = stripped.split(':', 1)[1].strip()
-                        break
-
-                if parsed_desc:
-                    # User entered a short description after 'Description:'
-                    short_desc = parsed_desc
-                elif has_description_label:
-                    # Template-style block with empty Description: should render as blank
-                    short_desc = ''
-                else:
-                    # Non-template free-text description
-                    short_desc = full_desc
+            # Use complete description for content template display
+            # Priority: 1) attributes.description (if set), 2) full item.description
+            # This allows the complete template data to be shown in the final document
+            description_to_use = (attributes.get('description') or '').strip()
+            if not description_to_use:
+                # Use the complete description from item.description
+                description_to_use = item.get('description') or ''
 
             # Try multiple possible keys for area/room
             area = (
@@ -2424,7 +2424,7 @@ def _handle_content_table(doc: Document, project_data: Dict):
                 'item': item,
                 'attributes': attributes,
                 'area': area,
-                'description': short_desc,
+                'description': description_to_use,
                 'fmv': fmv,
                 'index': index,
             })
@@ -2902,12 +2902,22 @@ def _handle_wine_table(doc: Document, project_data: Dict):
             except:
                 row_cells[2].text = ''
             
-            # Auto-calculate and format total price (quantity * price_per_bottle)
-            total_value = quantity * price_per_bottle if quantity > 0 and price_per_bottle > 0 else 0
-            try:
-                row_cells[3].text = f"${total_value:,.2f}" if total_value > 0 else ''
-            except:
-                row_cells[3].text = ''
+            # Use manually set appraised_value if present, otherwise auto-calculate total price
+            # This allows users to manually override the calculated value
+            manual_value = wine.get('appraised_value')
+            if manual_value is not None and manual_value != '':
+                # User has manually set a value - use it
+                try:
+                    row_cells[3].text = f"${float(manual_value):,.2f}"
+                except:
+                    row_cells[3].text = ''
+            else:
+                # Auto-calculate and format total price (quantity * price_per_bottle)
+                total_value = quantity * price_per_bottle if quantity > 0 and price_per_bottle > 0 else 0
+                try:
+                    row_cells[3].text = f"${total_value:,.2f}" if total_value > 0 else ''
+                except:
+                    row_cells[3].text = ''
             
             # Format cells
             for cell in row_cells:
@@ -3205,19 +3215,31 @@ def _add_summary_table(doc: Document, items: list, item_type: str, project_data:
     if item_type == 'coin':
         for item in items:
             try:
-                # Parse description to get quantity and price
-                description = item.get('description', '')
-                quantity, price_per_coin = _parse_description_for_coin_wine(description, 'coins')
-                total_value += (quantity * price_per_coin)
+                # Prioritize manually set appraised_value over auto-calculation
+                manual_value = item.get('appraised_value')
+                if manual_value is not None and manual_value != '':
+                    # User has manually set a value - use it
+                    total_value += float(manual_value)
+                else:
+                    # Auto-calculate from description (quantity * price_per_coin)
+                    description = item.get('description', '')
+                    quantity, price_per_coin = _parse_description_for_coin_wine(description, 'coins')
+                    total_value += (quantity * price_per_coin)
             except Exception as e:
                 logger.error(f"Error calculating coin value: {str(e)}")
     elif item_type == 'wine':
         for item in items:
             try:
-                # Parse description to get quantity and price
-                description = item.get('description', '')
-                quantity, price_per_bottle = _parse_description_for_coin_wine(description, 'wine')
-                total_value += (quantity * price_per_bottle)
+                # Prioritize manually set appraised_value over auto-calculation
+                manual_value = item.get('appraised_value')
+                if manual_value is not None and manual_value != '':
+                    # User has manually set a value - use it
+                    total_value += float(manual_value)
+                else:
+                    # Auto-calculate from description (quantity * price_per_bottle)
+                    description = item.get('description', '')
+                    quantity, price_per_bottle = _parse_description_for_coin_wine(description, 'wine')
+                    total_value += (quantity * price_per_bottle)
             except Exception as e:
                 logger.error(f"Error calculating wine value: {str(e)}")
     elif item_type == 'content':
