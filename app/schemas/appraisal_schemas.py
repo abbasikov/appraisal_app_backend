@@ -131,8 +131,7 @@ ITEM_SCHEMAS = {
     "coin": COIN_SCHEMA,
     "wine": WINE_SCHEMA,
     "content": CONTENT_SCHEMA,
-    "jewellery": IMAGE_SCHEMA,
-    "jewelry": IMAGE_SCHEMA,  # Alternative spelling
+    "jewelry": IMAGE_SCHEMA,
     "artwork": IMAGE_SCHEMA,
     "art": IMAGE_SCHEMA,
     "auto": IMAGE_SCHEMA,
@@ -151,7 +150,7 @@ def get_schema_for_type(item_type: str) -> dict:
     Get JSON schema for item type
     
     Args:
-        item_type: Type of appraisal item (coin, wine, jewellery, etc.)
+        item_type: Type of appraisal item (coin, wine, jewelry, etc.)
     
     Returns:
         JSON schema dictionary

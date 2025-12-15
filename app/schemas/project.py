@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from typing import Optional, List
 from datetime import datetime, date
 from enum import Enum
@@ -36,6 +36,26 @@ class ProjectCreate(BaseModel):
     account_id: Optional[int] = None  # Account/Law firm associated with project
     template_id: Optional[int] = None
     notes: Optional[str] = None
+
+    @model_validator(mode='after')
+    def validate_conditional_fields(self) -> 'ProjectCreate':
+        # 1. case_name required for DIVORCE
+        if self.appraisal_type == AppraisalType.DIVORCE and not self.case_name:
+            raise ValueError('Case Name is required for Divorce appraisals')
+        
+        # 2. estate_of required for ESTATE
+        if self.appraisal_type == AppraisalType.ESTATE and not self.estate_of:
+            raise ValueError('Estate Of is required for Estate appraisals')
+            
+        # 3. effective_date required for DIVORCE
+        if self.appraisal_type == AppraisalType.DIVORCE and not self.effective_date:
+            raise ValueError('Effective Date is required for Divorce appraisals')
+            
+        # 4. appointment_date (inspection_date) required for ALL
+        if not self.inspection_date:
+            raise ValueError('Inspection Date is required')
+            
+        return self
 
 class ProjectUpdate(BaseModel):
     project_name: Optional[str] = None

@@ -9,7 +9,7 @@ import re
 
 class TemplateCategory(str, Enum):
     """Template categories"""
-    IMAGE_BASED = "image_based"  # artwork, auto, firearms, handbag, jewellery, watch
+    IMAGE_BASED = "image_based"  # artwork, auto, firearms, handbag, jewelery, watch
     COIN = "coin"
     CONTENT = "content"
     WINE = "wine"
@@ -18,7 +18,6 @@ class TemplateCategory(str, Enum):
 # These keywords will be searched within longer template names
 TEMPLATE_KEYWORDS = {
     # Image-based templates (all identical)
-    "jewellery": TemplateCategory.IMAGE_BASED,
     "jewelry": TemplateCategory.IMAGE_BASED,
     "artwork": TemplateCategory.IMAGE_BASED,
     "art": TemplateCategory.IMAGE_BASED,
@@ -48,8 +47,8 @@ def detect_template_category(template_name: str) -> TemplateCategory:
     Examples:
         "Divorce Template Wine Appraisal MSTEMPLATE-Doc" → WINE
         "Estate Template Coin Collection MSTEMPLATE" → COIN
-        "Divorce Template Jewellery Appraisal-FORM-FINAL" → IMAGE_BASED
-        "jewellery" → IMAGE_BASED
+        "Divorce Template Jewelry Appraisal-FORM-FINAL" → IMAGE_BASED
+        "jewelry" → IMAGE_BASED
     
     Args:
         template_name: Name of the template (case-insensitive)
@@ -148,9 +147,9 @@ if __name__ == "__main__":
     test_names = [
         "Divorce Template Wine Appraisal MSTEMPLATE-Doc",
         "Estate Template Coin Collection MSTEMPLATE",
-        "Divorce Template Jewellery Appraisal-FORM-FINAL",
+        "Divorce Template Jewelry Appraisal-FORM-FINAL",
         "Estate Template Content Inventory",
-        "jewellery",
+        "jewelry",
         "coin",
         "wine",
         "Divorce Template Artwork Appraisal",
