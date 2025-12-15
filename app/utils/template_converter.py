@@ -2258,7 +2258,7 @@ def _handle_coin_table(doc: Document, project_data: Dict):
         header_cells[1].text = "Year"
         header_cells[2].text = "Coin"
         header_cells[3].text = "Condition"
-        header_cells[4].text = "Appraised Price"
+        header_cells[4].text = "Appraised Value"
         
         # Make headers bold (no color)
         for cell in header_cells:
@@ -2267,7 +2267,7 @@ def _handle_coin_table(doc: Document, project_data: Dict):
             for para in cell.paragraphs:
                 for run in para.runs:
                     run.font.bold = True
-                    run.font.size = Pt(14)
+                    run.font.size = Pt(13)
         
         # Data rows
         logger.info(f"📝 Adding {len(coin_items)} coin items to table")
@@ -2316,7 +2316,7 @@ def _handle_coin_table(doc: Document, project_data: Dict):
             for cell in row_cells:
                 for para in cell.paragraphs:
                     for run in para.runs:
-                        run.font.size = Pt(14)
+                        run.font.size = Pt(12)
         
         logger.info("🔄 Moving new table to replace old table...")
         

@@ -158,6 +158,7 @@ class ProjectService:
             "purpose": project.purpose,
             "inspection_date": project.inspection_date,
             "report_date": project.report_date,
+            "effective_date": project.effective_date,
             "estate_of": project.estate_of,
             "date_of_death": project.date_of_death,
             "address_letter_to": project.address_letter_to,

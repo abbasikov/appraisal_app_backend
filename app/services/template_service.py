@@ -1,4 +1,4 @@
-import os
+import os, re
 import shutil
 from typing import List, Optional, Dict
 from sqlalchemy.orm import Session, joinedload
@@ -153,16 +153,15 @@ class TemplateService:
             template_type = project.appraisal_type.value if project.appraisal_type else ""
             
             # Try to extract the actual item type from template name
-            import re
             template_name_lower = template.name.lower()
-            keywords = ['wine', 'wines', 'coin', 'coins', 'jewellery', 'jewelry', 'artwork', 'art', 
+            keywords = ['wine', 'wines', 'coin', 'coins', 'jewelry', 'artwork', 'art', 
                        'auto', 'automobile', 'firearms', 'firearm', 'handbag', 'handbags', 'watch', 
                        'watches', 'content', 'contents', 'inventory']
             
             words = re.split(r'[\s\-_]+', template_name_lower)
             for word in words:
                 if word in keywords:
-                    template_type = word.capitalize() if word != 'jewelry' else 'Jewellery'
+                    template_type = word.capitalize() if word != 'jewelry' else 'Jewelry'
                     if word in ['wines']: template_type = 'Wine'
                     elif word in ['coins']: template_type = 'Coins'
                     elif word in ['contents', 'inventory']: template_type = 'Contents'
@@ -216,8 +215,17 @@ class TemplateService:
             
             # Look up precious metals prices based on effective_date, to be used
             # for template placeholders like gold_price, silver_price, plat_price.
-            effective_date = project.effective_date
-            logger.info(f"🌟🌟🌟 METAL PRICE SECTION - effective_date={effective_date} (type: {type(effective_date).__name__})")
+            
+            # Determine date for metal prices based on appraisal type
+            metal_price_date = project.effective_date
+            if project.appraisal_type == "DIVORCE":
+                metal_price_date = project.effective_date
+                logger.info(f"Using effective_date for DIVORCE metal prices: {metal_price_date}")
+            elif project.appraisal_type == "ESTATE":
+                metal_price_date = project.date_of_death
+                logger.info(f"Using date_of_death for ESTATE metal prices: {metal_price_date}")
+            
+            logger.info(f"🌟🌟🌟 METAL PRICE SECTION - date={metal_price_date} (type: {type(metal_price_date).__name__})")
 
             def _fetch_metals_from_external(date_):
                 """Fetch historical metal prices for the exact date from MetalpriceAPI.
@@ -387,11 +395,11 @@ class TemplateService:
                 
                 query = db.query(MetalsPrice).filter(MetalsPrice.metal_type == metal_type)
 
-                if effective_date:
-                    logger.info(f"{metal_emoji} Looking for exact price on {effective_date.strftime('%Y-%m-%d')}")
+                if metal_price_date:
+                    logger.info(f"{metal_emoji} Looking for exact price on {metal_price_date.strftime('%Y-%m-%d')}")
                     # Exact match for this date in DB
                     existing_exact = (
-                        query.filter(MetalsPrice.price_date == effective_date)
+                        query.filter(MetalsPrice.price_date == metal_price_date)
                         .order_by(MetalsPrice.created_at.desc())
                         .first()
                     )
@@ -403,7 +411,7 @@ class TemplateService:
                     # If not cached yet, fetch once from external API for this date
                     if not external_prices_cache:
                         logger.info(f"{metal_emoji} Not found in DB, fetching from external API...")
-                        external_prices_cache.update(_fetch_metals_from_external(effective_date))
+                        external_prices_cache.update(_fetch_metals_from_external(metal_price_date))
 
                     if metal_type in external_prices_cache:
                         price = external_prices_cache[metal_type]
@@ -423,7 +431,7 @@ class TemplateService:
                 logger.info(f"{metal_emoji} ========== {metal_type.value.upper()} PRICE RETRIEVAL FAILED ==========\n")
                 return None
 
-            logger.info(f"🌟🌟🌟 ABOUT TO CALL _get_metal_price() - effective_date={effective_date}")
+            logger.info(f"🌟🌟🌟 ABOUT TO CALL _get_metal_price() - date={metal_price_date}")
             logger.info(f"💰 ========== FETCHING ALL METAL PRICES FOR REPORT ==========")
             gold_price = _get_metal_price(MetalType.GOLD)
             logger.info(f"🌟 Got gold_price={gold_price}")
@@ -444,6 +452,7 @@ class TemplateService:
                 "inspection_date": str(project.inspection_date) if project.inspection_date else "",
                 "report_date": str(project.report_date) if project.report_date else "",
                 "effective_date": str(project.effective_date) if project.effective_date else "",
+                "price_date": str(metal_price_date) if metal_price_date else "",
                 "appraisal_location": project.appraisal_location if project.appraisal_location else "",
                 "total_value": str(total_value),
                 # Estate-specific fields from project table
@@ -508,20 +517,19 @@ class TemplateService:
             from app.utils.template_detector import detect_template_category
             template_category = detect_template_category(template.name)
             
-            # Extract template type (wine, jewellery, coin, etc.) from template name
+            # Extract template type (wine, jewelry, coin, etc.) from template name
             template_type = project.appraisal_type.value if project.appraisal_type else ""
             
             # Try to extract the actual item type from template name
-            import re
             template_name_lower = template.name.lower()
-            keywords = ['wine', 'wines', 'coin', 'coins', 'jewellery', 'jewelry', 'artwork', 'art', 
+            keywords = ['wine', 'wines', 'coin', 'coins', 'jewelry', 'artwork', 'art', 
                        'auto', 'automobile', 'firearms', 'firearm', 'handbag', 'handbags', 'watch', 
                        'watches', 'content', 'contents', 'inventory']
             
             words = re.split(r'[\s\-_]+', template_name_lower)
             for word in words:
                 if word in keywords:
-                    template_type = word.capitalize() if word != 'jewelry' else 'Jewellery'
+                    template_type = word.capitalize() if word != 'jewelry' else 'Jewelry'
                     if word in ['wines']: template_type = 'Wine'
                     elif word in ['coins']: template_type = 'Coins'
                     elif word in ['contents', 'inventory']: template_type = 'Contents'
