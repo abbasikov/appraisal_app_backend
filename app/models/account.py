@@ -18,6 +18,7 @@ class Account(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
+    company = Column(String)
     account_type = Column(Enum(AccountType), nullable=False)
     address = Column(Text)
     city = Column(String)

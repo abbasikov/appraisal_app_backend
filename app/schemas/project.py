@@ -3,6 +3,38 @@ from typing import Optional, List
 from datetime import datetime, date
 from enum import Enum
 
+class RecipientBase(BaseModel):
+    name: str
+    title: Optional[str] = None
+    company: Optional[str] = None
+    address: str
+    city: str
+    state: str
+    zip_code: str
+
+class RecipientCreate(RecipientBase):
+    @model_validator(mode='after')
+    def validate_required_fields(self) -> 'RecipientCreate':
+        # Ensure core recipient identity fields are present when a recipient is provided
+        if not self.name or not self.name.strip():
+            raise ValueError('Recipient name is required')
+        if not self.address or not self.address.strip():
+            raise ValueError('Recipient address is required')
+        if not self.city or not self.city.strip():
+            raise ValueError('Recipient city is required')
+        if not self.state or not self.state.strip():
+            raise ValueError('Recipient state is required')
+        if not self.zip_code or not self.zip_code.strip():
+            raise ValueError('Recipient zip code is required')
+        return self
+
+class RecipientResponse(RecipientBase):
+    id: int
+    project_id: int
+
+    class Config:
+        from_attributes = True
+
 class AppraisalType(str, Enum):
     DIVORCE = "DIVORCE"
     ESTATE = "ESTATE" 
@@ -36,6 +68,7 @@ class ProjectCreate(BaseModel):
     account_id: Optional[int] = None  # Account/Law firm associated with project
     template_id: Optional[int] = None
     notes: Optional[str] = None
+    recipient: Optional[RecipientCreate] = None
 
     @model_validator(mode='after')
     def validate_conditional_fields(self) -> 'ProjectCreate':
@@ -76,6 +109,7 @@ class ProjectUpdate(BaseModel):
     status: Optional[ProjectStatus] = None
     dropbox_folder_link: Optional[str] = None
     notes: Optional[str] = None
+    recipient: Optional[RecipientCreate] = None
 
 class ProjectResponse(BaseModel):
     id: int
@@ -103,6 +137,7 @@ class ProjectResponse(BaseModel):
     notes: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    recipient: Optional[RecipientResponse] = None
     
     class Config:
         from_attributes = True

@@ -74,9 +74,26 @@ class ProjectService:
             except Exception as log_error:
                 pass
             
+            # Create Recipient if provided
+            if project.recipient:
+                from app.models.recipient import Recipient
+                recipient = Recipient(
+                    project_id=db_project.id,
+                    name=project.recipient.name,
+                    title=project.recipient.title,
+                    company=project.recipient.company,
+                    address=project.recipient.address,
+                    city=project.recipient.city,
+                    state=project.recipient.state,
+                    zip_code=project.recipient.zip_code
+                )
+                db.add(recipient)
+                db.commit()
+            
             return db_project
         except Exception as e:
             db.rollback()
+            print(f"Error creating project: {e}")
             return None
     
     @staticmethod
@@ -173,7 +190,18 @@ class ProjectService:
             "item_count": project.item_count,
             "notes": project.notes,
             "created_at": project.created_at,
-            "updated_at": project.updated_at
+            "updated_at": project.updated_at,
+            "recipient": {
+                "id": project.recipient.id,
+                "project_id": project.recipient.project_id,
+                "name": project.recipient.name,
+                "title": project.recipient.title,
+                "company": project.recipient.company,
+                "address": project.recipient.address,
+                "city": project.recipient.city,
+                "state": project.recipient.state,
+                "zip_code": project.recipient.zip_code
+            } if project.recipient else None
         }
     
     @staticmethod
@@ -201,6 +229,36 @@ class ProjectService:
         )
         db.add(activity)
         db.commit()
+        
+        # Update Recipient if provided
+        if project_update.recipient:
+            from app.models.recipient import Recipient
+            recipient = db.query(Recipient).filter(Recipient.project_id == project_id).first()
+            
+            if recipient:
+                # Update existing
+                if project_update.recipient.name: recipient.name = project_update.recipient.name
+                if project_update.recipient.title is not None: recipient.title = project_update.recipient.title
+                if project_update.recipient.company is not None: recipient.company = project_update.recipient.company
+                if project_update.recipient.address is not None: recipient.address = project_update.recipient.address
+                if project_update.recipient.city is not None: recipient.city = project_update.recipient.city
+                if project_update.recipient.state is not None: recipient.state = project_update.recipient.state
+                if project_update.recipient.zip_code is not None: recipient.zip_code = project_update.recipient.zip_code
+            else:
+                # Create new if not exists
+                recipient = Recipient(
+                    project_id=project_id,
+                    name=project_update.recipient.name,
+                    title=project_update.recipient.title,
+                    company=project_update.recipient.company,
+                    address=project_update.recipient.address,
+                    city=project_update.recipient.city,
+                    state=project_update.recipient.state,
+                    zip_code=project_update.recipient.zip_code
+                )
+                db.add(recipient)
+            
+            db.commit()
         
         return project
     

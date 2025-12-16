@@ -459,6 +459,11 @@ class TemplateService:
                 "estate_of": project.estate_of if project.estate_of else "",
                 "date_of_death": str(project.date_of_death) if project.date_of_death else "",
                 "address_letter_to": project.address_letter_to if project.address_letter_to else "",
+                # Recipient placeholders with rec_ prefix
+                "recipient_name": project.recipient.name if project.recipient else "",
+                "recipient_title": project.recipient.title if project.recipient and project.recipient.title else "",
+                "recipient_company": project.recipient.company if project.recipient and project.recipient.company else "",
+                "recipient_address": f"{project.recipient.address or ''},{project.recipient.city or ''}, {project.recipient.state or ''} {project.recipient.zip_code or ''}".strip() if project.recipient else "",
                 # Metals prices (numeric, will be formatted in template_converter)
                 "gold_price": float(gold_price) if gold_price is not None else None,
                 "silver_price": float(silver_price) if silver_price is not None else None,
