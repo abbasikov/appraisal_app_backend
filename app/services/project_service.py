@@ -211,6 +211,10 @@ class ProjectService:
             return None
         
         update_data = project_update.dict(exclude_unset=True)
+        
+        # Extract recipient before setting project fields
+        recipient_data = update_data.pop('recipient', None)
+        
         for field, value in update_data.items():
             if field == 'appraisal_location' and value:
                 setattr(project, field, value.strip())
@@ -231,34 +235,39 @@ class ProjectService:
         db.commit()
         
         # Update Recipient if provided
-        if project_update.recipient:
+        if recipient_data:
             from app.models.recipient import Recipient
             recipient = db.query(Recipient).filter(Recipient.project_id == project_id).first()
             
             if recipient:
-                # Update existing
-                if project_update.recipient.name: recipient.name = project_update.recipient.name
-                if project_update.recipient.title is not None: recipient.title = project_update.recipient.title
-                if project_update.recipient.company is not None: recipient.company = project_update.recipient.company
-                if project_update.recipient.address is not None: recipient.address = project_update.recipient.address
-                if project_update.recipient.city is not None: recipient.city = project_update.recipient.city
-                if project_update.recipient.state is not None: recipient.state = project_update.recipient.state
-                if project_update.recipient.zip_code is not None: recipient.zip_code = project_update.recipient.zip_code
+                # Update existing - only update fields that are provided (not None)
+                if recipient_data.get('name') is not None: recipient.name = recipient_data['name']
+                if recipient_data.get('title') is not None: recipient.title = recipient_data['title']
+                if recipient_data.get('company') is not None: recipient.company = recipient_data['company']
+                if recipient_data.get('address') is not None: recipient.address = recipient_data['address']
+                if recipient_data.get('city') is not None: recipient.city = recipient_data['city']
+                if recipient_data.get('state') is not None: recipient.state = recipient_data['state']
+                if recipient_data.get('zip_code') is not None: recipient.zip_code = recipient_data['zip_code']
+                db.commit()
             else:
-                # Create new if not exists
-                recipient = Recipient(
-                    project_id=project_id,
-                    name=project_update.recipient.name,
-                    title=project_update.recipient.title,
-                    company=project_update.recipient.company,
-                    address=project_update.recipient.address,
-                    city=project_update.recipient.city,
-                    state=project_update.recipient.state,
-                    zip_code=project_update.recipient.zip_code
-                )
-                db.add(recipient)
-            
-            db.commit()
+                # Only create new recipient if all required fields are provided
+                if (recipient_data.get('name') and 
+                    recipient_data.get('address') and 
+                    recipient_data.get('city') and 
+                    recipient_data.get('state') and 
+                    recipient_data.get('zip_code')):
+                    recipient = Recipient(
+                        project_id=project_id,
+                        name=recipient_data['name'],
+                        title=recipient_data.get('title'),
+                        company=recipient_data.get('company'),
+                        address=recipient_data['address'],
+                        city=recipient_data['city'],
+                        state=recipient_data['state'],
+                        zip_code=recipient_data['zip_code']
+                    )
+                    db.add(recipient)
+                    db.commit()
         
         return project
     
