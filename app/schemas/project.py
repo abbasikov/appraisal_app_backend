@@ -1,4 +1,4 @@
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, model_validator, field_validator
 from typing import Optional, List
 from datetime import datetime, date
 from enum import Enum
@@ -34,6 +34,33 @@ class RecipientResponse(RecipientBase):
 
     class Config:
         from_attributes = True
+
+class RecipientUpdate(BaseModel):
+    name: Optional[str] = None
+    title: Optional[str] = None
+    company: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip_code: Optional[str] = None
+
+    @model_validator(mode='after')
+    def validate_if_provided(self) -> 'RecipientUpdate':
+        # If any recipient field is provided, validate that all required fields are present and non-empty
+        fields_provided = [self.name, self.address, self.city, self.state, self.zip_code]
+        if any(field is not None for field in fields_provided):
+            # At least one field is provided, so validate all required ones
+            if not self.name or not self.name.strip():
+                raise ValueError('Recipient name is required')
+            if not self.address or not self.address.strip():
+                raise ValueError('Recipient address is required')
+            if not self.city or not self.city.strip():
+                raise ValueError('Recipient city is required')
+            if not self.state or not self.state.strip():
+                raise ValueError('Recipient state is required')
+            if not self.zip_code or not self.zip_code.strip():
+                raise ValueError('Recipient zip code is required')
+        return self
 
 class AppraisalType(str, Enum):
     DIVORCE = "DIVORCE"
@@ -109,7 +136,15 @@ class ProjectUpdate(BaseModel):
     status: Optional[ProjectStatus] = None
     dropbox_folder_link: Optional[str] = None
     notes: Optional[str] = None
-    recipient: Optional[RecipientCreate] = None
+    recipient: Optional[RecipientUpdate] = None
+
+    @field_validator('account_id', 'assigned_user_id', 'client_id', 'template_id', mode='before')
+    @classmethod
+    def convert_empty_str_to_none(cls, v):
+        """Convert empty strings to None for integer fields"""
+        if v == '' or v == 'null' or v == 'undefined':
+            return None
+        return v
 
 class ProjectResponse(BaseModel):
     id: int
