@@ -11,6 +11,7 @@ from .metals_price import MetalsPrice
 from .activity_log import ActivityLog
 from .verification_code import VerificationCode
 from .task_status import TaskStatus
+from .recipient import Recipient
 
 # Legacy models (keeping for backward compatibility)
 from .property import Property

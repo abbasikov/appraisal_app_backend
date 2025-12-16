@@ -5,6 +5,7 @@ from app.models.account import AccountType
 
 class AccountCreate(BaseModel):
     name: str
+    company: Optional[str] = None
     account_type: AccountType
     address: Optional[str] = None
     city: Optional[str] = None
@@ -19,6 +20,7 @@ class AccountCreate(BaseModel):
 
 class AccountUpdate(BaseModel):
     name: Optional[str] = None
+    company: Optional[str] = None
     account_type: Optional[AccountType] = None
     address: Optional[str] = None
     city: Optional[str] = None
@@ -35,6 +37,7 @@ class AccountUpdate(BaseModel):
 class AccountResponse(BaseModel):
     id: int
     name: str
+    company: Optional[str] = None
     account_type: AccountType
     address: Optional[str] = None
     city: Optional[str] = None
