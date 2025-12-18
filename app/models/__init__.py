@@ -12,6 +12,7 @@ from .activity_log import ActivityLog
 from .verification_code import VerificationCode
 from .task_status import TaskStatus
 from .recipient import Recipient
+from .archive import Archive
 
 # Legacy models (keeping for backward compatibility)
 from .property import Property
