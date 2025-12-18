@@ -12,6 +12,8 @@ class ProjectService:
     @staticmethod
     def create_project(db: Session, project: ProjectCreate, user_id: int) -> Optional[Project]:
         try:
+            from app.services.archive_service import ArchiveService
+            
             # Validate required fields
             if not project.project_name or not project.project_name.strip():
                 return None
@@ -24,13 +26,28 @@ class ProjectService:
             if not client:
                 return None
             
+            # Determine account_id: use provided value or fallback to client's parent_account_id
+            account_id = project.account_id or client.parent_account_id
+            
+            # Check if this client-account pair is archived (archive_status = False)
+            if account_id and ArchiveService.is_archived(db, project.client_id, account_id):
+                print(f"Cannot create project: Client-Account pair ({project.client_id}, {account_id}) is archived")
+                return None
+            
+            # Auto-create archive record for this client-account pair if it doesn't exist
+            # Archive status will be True by default (active)
+            if account_id:
+                ArchiveService.create_or_update_archive(
+                    db,
+                    project.client_id,
+                    account_id,
+                    archive_status=True  # Always True unless client is deleted
+                )
+            
             # Update client's case_name if provided
             if project.case_name:
                 client.case_name = project.case_name.strip()
                 db.commit()
-            
-            # Determine account_id: use provided value or fallback to client's parent_account_id
-            account_id = project.account_id or client.parent_account_id
             
             # Update client's parent_account_id if project has an account_id
             # This establishes the client-account association through the project

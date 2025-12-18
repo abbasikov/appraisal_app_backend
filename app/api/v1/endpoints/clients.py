@@ -89,6 +89,7 @@ async def update_client(
 @router.delete("/{client_id}")
 async def delete_client(
     client_id: int,
+    account_id: int = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -99,11 +100,11 @@ async def delete_client(
             detail="Not enough permissions"
         )
     
-    success = ClientService.delete_client(db, client_id, current_user.id)
+    success = ClientService.delete_client(db, client_id, current_user.id, account_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Client not found"
         )
     
-    return {"message": "Client deleted successfully"}
+    return {"message": "Client archived successfully"}

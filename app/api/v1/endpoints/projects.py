@@ -24,6 +24,9 @@ async def create_project(
     current_user: User = Depends(get_current_user)
 ):
     try:
+        from app.services.archive_service import ArchiveService
+        from app.models.client import Client
+        
         # Only Admin/Editor can create projects
         if current_user.role not in [UserRole.ADMIN, UserRole.EDITOR]:
             raise HTTPException(
@@ -31,6 +34,15 @@ async def create_project(
                 detail="Not enough permissions"
             )
         
+        # Check if client-account pair is archived before attempting to create project
+        client = db.query(Client).filter(Client.id == project.client_id).first()
+        if client:
+            account_id = project.account_id or client.parent_account_id
+            if account_id and ArchiveService.is_archived(db, project.client_id, account_id):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot create project: This client-attorney pair (Client ID: {project.client_id}, Account ID: {account_id}) has been archived and no new projects can be created."
+                )
 
         
         db_project = ProjectService.create_project(db, project, current_user.id)

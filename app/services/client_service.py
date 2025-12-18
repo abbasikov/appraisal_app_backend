@@ -151,20 +151,62 @@ class ClientService:
         return client
     
     @staticmethod
-    def delete_client(db: Session, client_id: int, user_id: int) -> bool:
+    def delete_client(db: Session, client_id: int, user_id: int, account_id: int = None) -> bool:
+        """
+        Delete/archive a client for a specific account (attorney).
+        Only the specified client-account pair is archived, not all pairs.
+        Client remains active in the system (is_active stays True).
+        
+        Args:
+            db: Database session
+            client_id: ID of the client to archive
+            user_id: ID of the user performing the deletion
+            account_id: ID of the account/attorney archiving this client-pair.
+                       If provided, only this pair is archived.
+                       If not provided, archives all pairs.
+        """
+        from app.services.archive_service import ArchiveService
+        from app.models.project import Project
+        
         client = db.query(Client).filter(Client.id == client_id).first()
         if not client:
             return False
         
-        # Soft delete - set is_active = False
-        client.is_active = False
-        db.commit()
+        archived_pairs = set()
+        
+        if account_id:
+            # Archive only the specific client-account pair
+            ArchiveService.create_or_update_archive(
+                db, 
+                client_id, 
+                account_id, 
+                archive_status=False
+            )
+            archived_pairs.add((client_id, account_id))
+        else:
+            # If no specific account provided, archive all pairs for this client
+            projects = db.query(Project).filter(Project.client_id == client_id).all()
+            for project in projects:
+                if project.account_id:
+                    pair_key = (client_id, project.account_id)
+                    if pair_key not in archived_pairs:
+                        ArchiveService.create_or_update_archive(
+                            db, 
+                            client_id, 
+                            project.account_id, 
+                            archive_status=False
+                        )
+                        archived_pairs.add(pair_key)
+        
+        # NOTE: Client remains active (is_active stays True)
+        # Only the client-account pair is archived in the archive table
+        # Client is NOT soft-deleted
         
         # Log activity
         activity = ActivityLog(
             user_id=user_id,
-            action=f"Deleted client: {client.name}",
-            details={"client_id": client_id}
+            action=f"Archived client-account pair: Client {client.name} (ID: {client_id}), Account: {account_id}",
+            details={"client_id": client_id, "account_id": account_id, "archived_pairs": list(archived_pairs)}
         )
         db.add(activity)
         db.commit()
