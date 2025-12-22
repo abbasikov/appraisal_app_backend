@@ -29,6 +29,8 @@ TEMPLATE_KEYWORDS = {
     "handbags": TemplateCategory.IMAGE_BASED,
     "watch": TemplateCategory.IMAGE_BASED,
     "watches": TemplateCategory.IMAGE_BASED,
+    "collectibles": TemplateCategory.IMAGE_BASED,
+    "collectible": TemplateCategory.IMAGE_BASED,
     
     # Table-based templates (each different)
     "coin": TemplateCategory.COIN,
@@ -157,6 +159,8 @@ if __name__ == "__main__":
         "Divorce Template Firearms Appraisal",
         "Estate Template Handbag Appraisal",
         "Divorce Template Watch Appraisal",
+        "Estate Template Collectibles Appraisal",
+        "Divorce Template collectibles Appraisal",
         "unknown template name",
     ]
     
