@@ -2161,10 +2161,18 @@ def _add_images_after_table_coin_wine(doc: Document, items: list, tbl_element, p
                         if p.text:
                             p.text = ""
 
-                    # Add the image at 2" x 2" and center it
+                    # Add image with number in the same paragraph
                     paragraph = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
-                    run = paragraph.add_run()
-                    run.add_picture(photo_path, width=Inches(2), height=Inches(2))
+                    
+                    # Add the number as a run (e.g., "1.", "2.", "3.", etc.)
+                    number_run = paragraph.add_run(f"{idx + 1}. ")
+                    number_run.font.bold = True
+                    number_run.font.size = Pt(12)
+                    
+                    # Add the image in the same paragraph
+                    image_run = paragraph.add_run()
+                    image_run.add_picture(photo_path, width=Inches(2), height=Inches(2))
+                    
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
                     images_added += 1
