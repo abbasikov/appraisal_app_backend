@@ -1,12 +1,21 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from typing import List, Optional
+from datetime import datetime
 from app.models.appraisal_item import AppraisalItem
 from app.models.photo import Photo
 from app.models.project import Project
 from app.schemas.appraisal_item import AppraisalItemCreate, AppraisalItemUpdate, AppraisalItemReorder
 
 class AppraisalService:
+    
+    @staticmethod
+    def _touch_project_updated_at(db: Session, project_id: int) -> None:
+        """Update the project's updated_at timestamp to reflect changes"""
+        project = db.query(Project).filter(Project.id == project_id).first()
+        if project:
+            project.updated_at = datetime.utcnow()
+            db.commit()
     
     @staticmethod
     def create_items_from_photos(db: Session, project_id: int, user_id: int) -> List[AppraisalItem]:
@@ -45,6 +54,10 @@ class AppraisalService:
                 items.append(item)
             
             db.commit()
+            
+            # Update project's updated_at if new items were created
+            if items:
+                AppraisalService._touch_project_updated_at(db, project_id)
             
             # Return all items for the project (existing + new)
             return db.query(AppraisalItem).filter(
@@ -126,6 +139,9 @@ class AppraisalService:
             db.commit()
             db.refresh(item)
             
+            # Update project's updated_at to reflect this change
+            AppraisalService._touch_project_updated_at(db, item_create.project_id)
+            
             return item
             
         except Exception as e:
@@ -150,6 +166,10 @@ class AppraisalService:
             
             db.commit()
             db.refresh(item)
+            
+            # Update project's updated_at to reflect this change
+            AppraisalService._touch_project_updated_at(db, item.project_id)
+            
             return item
             
         except Exception as e:
@@ -170,6 +190,10 @@ class AppraisalService:
                     item.sort_order = reorder.new_sort_order
             
             db.commit()
+            
+            # Update project's updated_at to reflect this change
+            AppraisalService._touch_project_updated_at(db, project_id)
+            
             return True
             
         except Exception as e:
@@ -190,6 +214,10 @@ class AppraisalService:
             
             db.delete(item)
             db.commit()
+            
+            # Update project's updated_at to reflect this change
+            AppraisalService._touch_project_updated_at(db, project_id)
+            
             return True
             
         except Exception as e:

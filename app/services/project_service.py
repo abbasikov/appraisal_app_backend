@@ -127,6 +127,9 @@ class ProjectService:
             if client_id and client_id > 0:
                 query = query.filter(Project.client_id == client_id)
             
+            # Order by updated_at descending (most recently updated first), then by created_at descending
+            query = query.order_by(Project.updated_at.desc().nullslast(), Project.created_at.desc())
+            
             results = query.offset(skip).limit(limit).all()
         except Exception as e:
             print(f"Error fetching projects: {e}")
