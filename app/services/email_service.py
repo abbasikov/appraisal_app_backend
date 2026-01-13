@@ -10,7 +10,7 @@ class EmailService:
         """Send invitation email to new user"""
         try:
             # Create invitation URL
-            invitation_url = f"{settings.FRONTEND_URL.rstrip('/')}/setup-password"
+            invitation_url = f"{settings.FRONTEND_URL.rstrip('/')}/setup-password?token={token}"
             
             # Email content
             subject = "Invitation to Appraisal Report Management System"
