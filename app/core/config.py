@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     
     DATABASE_URL: str
     ALLOWED_HOSTS: str = "http://localhost:3000,http://localhost:5173"
+    FRONTEND_URL: str = "http://localhost:5173"
     
     @property
     def allowed_hosts_list(self) -> List[str]:
