@@ -1,4 +1,5 @@
 import smtplib
+import email.utils
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from app.core.config import settings
@@ -119,6 +120,11 @@ class EmailService:
             msg['Subject'] = subject
             msg['From'] = settings.SMTP_FROM_EMAIL
             msg['To'] = to_email
+            msg['Reply-To'] = settings.SMTP_FROM_EMAIL
+            msg['Return-Path'] = settings.SMTP_FROM_EMAIL
+            msg['Date'] = email.utils.formatdate(localtime=True)
+            msg['Message-ID'] = email.utils.make_msgid(domain=settings.SMTP_FROM_EMAIL.split('@')[1])
+            msg['X-Mailer'] = 'Appraisal App Email Service'
             
             # Add text part
             text_part = MIMEText(text_body, 'plain')
@@ -148,9 +154,14 @@ class EmailService:
                         print(f"   Error: {auth_error}")
                         print(f"   Username: {settings.SMTP_USERNAME}")
                         raise ValueError(f"SMTP Authentication failed. Error: {auth_error}")
-                    
-                    server.send_message(msg)
+                    refused = server.send_message(msg)
+                    if refused:
+                        print(f"⚠️  Some recipients were refused:")
+                        for email_addr, error in refused.items():
+                            print(f"   ❌ {email_addr}: {error}")
+                        raise ValueError(f"Email was refused by server: {refused}")
                     print(f"✅ Email sent successfully to {to_email}")
+
             else:
                 # Use STARTTLS for port 587
                 print(f"   Using STARTTLS (port 587)")
@@ -166,7 +177,12 @@ class EmailService:
                         print(f"   Username: {settings.SMTP_USERNAME}")
                         raise ValueError(f"SMTP Authentication failed. Error: {auth_error}")
                     
-                    server.send_message(msg)
+                    refused = server.send_message(msg)
+                    if refused:
+                        print(f"⚠️  Some recipients were refused:")
+                        for email_addr, error in refused.items():
+                            print(f"   ❌ {email_addr}: {error}")
+                        raise ValueError(f"Email was refused by server: {refused}")
                     print(f"✅ Email sent successfully to {to_email}")
                 
         except ValueError as ve:
