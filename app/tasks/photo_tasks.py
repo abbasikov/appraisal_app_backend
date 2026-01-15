@@ -89,19 +89,26 @@ def import_photos_background(self, project_id: int, dropbox_links: List[str], us
             result.get("total_found", 0) if "total_found" in result else result.get("imported_count", 0)
         )
         
-        # Send email notification if import was successful
+        # Send email notification ONLY if notification_email is explicitly provided
         if result["success"] and result.get("imported_count", 0) > 0:
             try:
                 project = db.query(Project).filter(Project.id == project_id).first()
-                if project and project.notification_email:
+                
+                # Only send email if notification_email is explicitly set
+                if project and project.notification_email and project.notification_email.strip():
+                    print(f"📧 Sending import completion email to: {project.notification_email}")
                     EmailService.send_import_completion_email(
                         project.notification_email,
                         project.project_name,
                         result.get("imported_count", 0),
                         result.get("total_found")
                     )
+                else:
+                    print(f"ℹ️ No notification_email configured for project - skipping email notification")
             except Exception as email_error:
                 print(f"⚠️ Email notification failed: {email_error}")
+                import traceback
+                traceback.print_exc()
         
         return result
         
@@ -265,18 +272,25 @@ def import_photos_recurring_batches(self, project_id: int, dropbox_links: List[s
             json.dumps(final_result)
         )
         
-        # Send email notification if import was successful
+        # Send email notification ONLY if notification_email is explicitly provided
         if final_result["success"] and total_imported > 0:
             try:
                 project = db.query(Project).filter(Project.id == project_id).first()
-                if project and project.notification_email:
+                
+                # Only send email if notification_email is explicitly set
+                if project and project.notification_email and project.notification_email.strip():
+                    print(f"📧 Sending import completion email to: {project.notification_email}")
                     EmailService.send_import_completion_email(
                         project.notification_email,
                         project.project_name,
                         total_imported
                     )
+                else:
+                    print(f"ℹ️ No notification_email configured for project - skipping email notification")
             except Exception as email_error:
                 print(f"⚠️ Email notification failed: {email_error}")
+                import traceback
+                traceback.print_exc()
         
         return final_result
         
