@@ -3,7 +3,7 @@ import shutil
 from typing import List, Optional
 from datetime import datetime
 from sqlalchemy.orm import Session
-from PIL import Image, ExifTags
+from PIL import Image, ExifTags, ImageOps
 from PIL.ExifTags import TAGS
 
 from app.models.photo import Photo
@@ -349,6 +349,8 @@ class PhotoService:
                 thumbnail_path = os.path.join(thumbnail_dir, thumbnail_name)
             
             with Image.open(image_path) as image:
+                # Apply EXIF orientation so thumbnails display right-side-up (e.g. from phone cameras)
+                image = ImageOps.exif_transpose(image)
                 # Convert to RGB if necessary (for PNG with transparency, etc.)
                 if image.mode in ('RGBA', 'LA', 'P'):
                     image = image.convert('RGB')
@@ -404,7 +406,7 @@ class PhotoService:
             query = db.query(Photo).filter(
                 Photo.project_id == project_id,
                 Photo.is_deleted == False
-            ).order_by(Photo.exif_date.asc().nullslast(), Photo.sort_order.asc())
+            ).order_by(Photo.exif_date.asc().nullslast(), Photo.id.asc())
             
             if limit is not None:
                 query = query.offset(skip).limit(limit)
