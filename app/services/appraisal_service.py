@@ -76,7 +76,7 @@ class AppraisalService:
                 Photo, AppraisalItem.photo_id == Photo.id
             ).filter(
                 AppraisalItem.project_id == project_id
-            ).order_by(AppraisalItem.sort_order.asc()).all()
+            ).order_by(Photo.exif_date.asc().nullslast(), AppraisalItem.sort_order.asc()).all()
             
             result = []
             line_number = 1  # Sequential numbering
