@@ -1,5 +1,6 @@
 import os
 import shutil
+import tempfile
 from typing import List, Optional
 from datetime import datetime
 from sqlalchemy.orm import Session
@@ -65,6 +66,8 @@ class PhotoService:
                     success = dropbox_service.download_file(file_info['path'], local_path, file_info['source_link'])
                 
                 if success:
+                    # Convert MPO to JPEG at ingest so reports/thumbnails use one format
+                    PhotoService.convert_mpo_to_jpeg_if_needed(local_path)
                     # Process image
                     exif_date = PhotoService.extract_exif_date(local_path)
                     width, height = PhotoService.get_image_dimensions(local_path)
@@ -193,6 +196,8 @@ class PhotoService:
                         success = dropbox_service.download_file(file_info['path'], local_path, link)
                     
                     if success:
+                        # Convert MPO to JPEG at ingest so reports/thumbnails use one format
+                        PhotoService.convert_mpo_to_jpeg_if_needed(local_path)
                         # Extract EXIF data with improved method
                         exif_date = PhotoService.extract_exif_date(local_path)
                         
@@ -325,6 +330,33 @@ class PhotoService:
         except Exception as e:
             print(f"❌ Error getting dimensions for {os.path.basename(image_path)}: {e}")
             return None, None
+    
+    @staticmethod
+    def convert_mpo_to_jpeg_if_needed(image_path: str) -> None:
+        """If the image is MPO (e.g. iPhone .jpg with MPF metadata), convert to JPEG in-place.
+        Keeps the same path so DB and reports use it without further conversion."""
+        try:
+            with Image.open(image_path) as img:
+                if getattr(img, 'format', None) != 'MPO':
+                    return
+                img.seek(0)
+                img.load()
+                img = ImageOps.exif_transpose(img)
+                if img.mode not in ('RGB', 'L'):
+                    img = img.convert('RGB')
+                fd, temp_path = tempfile.mkstemp(suffix='.jpg')
+                os.close(fd)
+                try:
+                    img.save(temp_path, 'JPEG', quality=90)
+                    os.replace(temp_path, image_path)
+                finally:
+                    if os.path.exists(temp_path):
+                        try:
+                            os.remove(temp_path)
+                        except OSError:
+                            pass
+        except Exception as e:
+            print(f"⚠️ MPO conversion skipped for {os.path.basename(image_path)}: {e}")
     
     @staticmethod
     def create_thumbnail(image_path: str, project_id: int) -> Optional[str]:
