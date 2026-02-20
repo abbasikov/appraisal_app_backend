@@ -125,16 +125,18 @@ class TemplateService:
             
             # Get appraisal items for this project
             from app.models.appraisal_item import AppraisalItem
-            appraisal_items = db.query(AppraisalItem).filter(
-                AppraisalItem.project_id == project_id
-            ).order_by(AppraisalItem.sort_order).all()
-            
-            # Get all photos for this project
             from app.models.photo import Photo
+            appraisal_items = db.query(AppraisalItem).options(
+                joinedload(AppraisalItem.photo)
+            ).outerjoin(Photo, AppraisalItem.photo_id == Photo.id).filter(
+                AppraisalItem.project_id == project_id
+            ).order_by(Photo.exif_date.asc().nullslast(), AppraisalItem.sort_order.asc()).all()
+            
+            # Get all photos for this project (chronological by EXIF date)
             all_project_photos = db.query(Photo).filter(
                 Photo.project_id == project_id,
                 Photo.is_deleted == False
-            ).order_by(Photo.sort_order.asc()).all()
+            ).order_by(Photo.exif_date.asc().nullslast(), Photo.id.asc()).all()
             
             # Calculate total value from items
             total_value = sum(item.appraised_value or 0 for item in appraisal_items)

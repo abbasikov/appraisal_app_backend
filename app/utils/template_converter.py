@@ -1,5 +1,7 @@
 import re
-import os, textwrap
+import os
+import textwrap
+import tempfile
 import traceback
 from typing import Dict, List, Tuple, Optional
 from docx import Document
@@ -16,6 +18,8 @@ from app.utils.template_detector import TemplateCategory
 from collections import OrderedDict
 
 logger = logging.getLogger(__name__)
+
+_REPORT_TEMP_PATHS: List[str] = []
 
 class TemplateError(Exception):
     pass
@@ -130,6 +134,7 @@ def generate_report_from_template(template_path: str, output_path: str,
                                 add_watermark: bool = False,
                                 did_inspect: Optional[bool] = None) -> str:
     """Generate report from template using project data"""
+    _REPORT_TEMP_PATHS.clear()
     try:
         doc = Document(template_path)
         logger.info("⭐⭐⭐ DOCUMENT LOADED SUCCESSFULLY ⭐⭐⭐")
@@ -241,6 +246,13 @@ def generate_report_from_template(template_path: str, output_path: str,
     except Exception as e:
         logger.error(f"Report generation failed: {str(e)}")
         raise ReportGenerationError(f"Failed to generate report: {str(e)}")
+    finally:
+        for p in _REPORT_TEMP_PATHS:
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+        _REPORT_TEMP_PATHS.clear()
 
 def _get_inspection_placeholders(did_inspect: Optional[bool]) -> Dict[str, str]:
     """Get inspection-related placeholder values based on did_inspect flag"""
@@ -1251,11 +1263,13 @@ def _handle_appraisal_items(doc: Document, project_data: Dict):
                 
                 # Insert image and description side-by-side using text wrapping
                 photo_path = item.get('file_path') if 'file_path' in item else item.get('photo_path')
+                thumbnail_path = item.get('photo_thumbnail') or item.get('thumbnail_path')
+                path_for_doc = _get_report_image_path(photo_path, thumbnail_path)
                 
                 if photo_path and os.path.exists(photo_path) and description and description.strip():
                     # Create table layout with image on left, description on right
                     try:
-                        if _is_valid_image(photo_path):
+                        if path_for_doc:
                             current_index += 1
                             
                             # Create a placeholder paragraph and then replace it with a table
@@ -1311,7 +1325,7 @@ def _handle_appraisal_items(doc: Document, project_data: Dict):
                             img_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                             
                             img_run = img_paragraph.add_run()
-                            img_run.add_picture(photo_path, width=Inches(2), height=Inches(2))
+                            img_run.add_picture(path_for_doc, width=Inches(2), height=Inches(2))
                             
                             # Add description to second cell
                             desc_cell = table.cell(0, 1)
@@ -1334,7 +1348,7 @@ def _handle_appraisal_items(doc: Document, project_data: Dict):
                 elif photo_path and os.path.exists(photo_path):
                     # Image only, no description
                     try:
-                        if _is_valid_image(photo_path):
+                        if path_for_doc:
                             current_index += 1
                             img_p = doc.add_paragraph()._element
                             parent.remove(img_p)
@@ -1345,7 +1359,7 @@ def _handle_appraisal_items(doc: Document, project_data: Dict):
                                 if p._element == img_p:
                                     p.alignment = WD_ALIGN_PARAGRAPH.LEFT
                                     run = p.add_run()
-                                    run.add_picture(photo_path, width=Inches(2), height=Inches(2))
+                                    run.add_picture(path_for_doc, width=Inches(2), height=Inches(2))
                                     break
                     except Exception as img_error:
                         logger.error(f"Failed to insert image {photo_path}: {str(img_error)}")
@@ -1444,11 +1458,13 @@ def _handle_appraisal_items(doc: Document, project_data: Dict):
                 
                 # Add image and description side-by-side
                 photo_path = item.get('file_path') if 'file_path' in item else item.get('photo_path')
+                thumbnail_path = item.get('photo_thumbnail') or item.get('thumbnail_path')
+                path_for_doc = _get_report_image_path(photo_path, thumbnail_path)
                 
                 if photo_path and os.path.exists(photo_path) and description and description.strip():
                     # Create table layout with image on left, description on right
                     try:
-                        if _is_valid_image(photo_path):
+                        if path_for_doc:
                             # Create a 1x2 table (1 row, 2 columns)
                             table = doc.add_table(rows=1, cols=2)
                             
@@ -1481,7 +1497,7 @@ def _handle_appraisal_items(doc: Document, project_data: Dict):
                             img_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
                             
                             img_run = img_paragraph.add_run()
-                            img_run.add_picture(photo_path, width=Inches(2), height=Inches(2))
+                            img_run.add_picture(path_for_doc, width=Inches(2), height=Inches(2))
                             
                             # Add description to second cell
                             desc_cell = table.cell(0, 1)
@@ -1500,11 +1516,11 @@ def _handle_appraisal_items(doc: Document, project_data: Dict):
                 elif photo_path and os.path.exists(photo_path):
                     # Image only, no description
                     try:
-                        if _is_valid_image(photo_path):
+                        if path_for_doc:
                             img_p = doc.add_paragraph()
                             img_p.alignment = WD_ALIGN_PARAGRAPH.LEFT
                             run = img_p.add_run()
-                            run.add_picture(photo_path, width=Inches(2), height=Inches(2))
+                            run.add_picture(path_for_doc, width=Inches(2), height=Inches(2))
                     except Exception as img_error:
                         logger.error(f"Failed to insert image {photo_path}: {str(img_error)}")
                         doc.add_paragraph(f"[Image: {os.path.basename(photo_path)}]")
@@ -2043,6 +2059,34 @@ def _is_valid_image(image_path: str) -> bool:
         logger.error(f"Image validation failed for {image_path}: {str(e)}")
         return False
 
+
+def _get_report_image_path(photo_path: Optional[str], thumbnail_path: Optional[str]) -> Optional[str]:
+    """Path for add_picture: unchanged for valid formats; MPO→temp JPEG at report time only."""
+    if not photo_path or not os.path.exists(photo_path):
+        return None
+    if _is_valid_image(photo_path):
+        return photo_path
+    try:
+        from PIL import Image
+        from PIL import ImageOps
+        with Image.open(photo_path) as img:
+            if img.format != 'MPO':
+                return None
+            img.load()
+            img = ImageOps.exif_transpose(img)
+            if img.mode not in ('RGB', 'L'):
+                img = img.convert('RGB')
+            fd, temp_path = tempfile.mkstemp(suffix='.jpg')
+            os.close(fd)
+            img.save(temp_path, 'JPEG', quality=90)
+            _REPORT_TEMP_PATHS.append(temp_path)
+            return temp_path
+    except Exception:
+        if thumbnail_path and os.path.exists(thumbnail_path) and _is_valid_image(thumbnail_path):
+            return thumbnail_path
+        return None
+
+
 # ==================== TABLE RENDERING FUNCTIONS ====================
 
 def _parse_description_for_coin_wine(description: str, item_type: str) -> tuple:
@@ -2114,12 +2158,14 @@ def _add_images_after_table_coin_wine(doc: Document, items: list, tbl_element, p
 
     for idx, item in enumerate(items):
         photo_path = item.get('photo_path')
+        thumbnail_path = item.get('photo_thumbnail')
+        path_for_doc = _get_report_image_path(photo_path, thumbnail_path)
         logger.info(f"🔍 Item {idx + 1}: photo_path = {photo_path}")
         
         if photo_path and os.path.exists(photo_path):
             try:
                 # Validate image before adding
-                if _is_valid_image(photo_path):
+                if path_for_doc:
                     logger.info(f"📸 Placing image in grid for {os.path.basename(photo_path)}")
 
                     # Start a new grid when needed (8 images per page)
@@ -2171,7 +2217,7 @@ def _add_images_after_table_coin_wine(doc: Document, items: list, tbl_element, p
                     
                     # Add the image in the same paragraph
                     image_run = paragraph.add_run()
-                    image_run.add_picture(photo_path, width=Inches(2), height=Inches(2))
+                    image_run.add_picture(path_for_doc, width=Inches(2), height=Inches(2))
                     
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
@@ -2562,6 +2608,8 @@ def _add_content_photos_after_table(doc: Document, line_mappings: list, tbl_elem
             line_number = mapping['line_number']
             item = mapping['item']
             photo_path = item.get('photo_path')
+            thumbnail_path = item.get('photo_thumbnail')
+            path_for_doc = _get_report_image_path(photo_path, thumbnail_path)
             logger.info(f"   → Line {line_number}: photo_path={photo_path}")
 
             para = doc.add_paragraph()
@@ -2571,10 +2619,10 @@ def _add_content_photos_after_table(doc: Document, line_mappings: list, tbl_elem
             # Add a bit of extra horizontal spacing before the image
             para.add_run("   ")
 
-            if photo_path and os.path.exists(photo_path) and _is_valid_image(photo_path):
+            if path_for_doc:
                 try:
                     img_run = para.add_run()
-                    img_run.add_picture(photo_path, width=Inches(2), height=Inches(2))
+                    img_run.add_picture(path_for_doc, width=Inches(2), height=Inches(2))
                 except Exception as e:
                     logger.error(f"❌ Failed to add content photo for line {line_number}: {str(e)}")
             else:
