@@ -2060,12 +2060,37 @@ def _is_valid_image(image_path: str) -> bool:
         return False
 
 
+def _resize_image_for_report(image_path: str, max_size: int = 1200, quality: int = 82) -> Optional[str]:
+    """Resize image to max_size on longest side and save as JPEG to a temp file for report embedding.
+    Returns temp path (appended to _REPORT_TEMP_PATHS) or original path if already small. Skips resize when max(w,h) <= max_size."""
+    try:
+        from PIL import Image
+        from PIL import ImageOps
+        with Image.open(image_path) as img:
+            img = ImageOps.exif_transpose(img)
+            w, h = img.size
+            if max(w, h) <= max_size:
+                return image_path
+            if img.mode not in ('RGB', 'L'):
+                img = img.convert('RGB')
+            img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+            fd, temp_path = tempfile.mkstemp(suffix='.jpg')
+            os.close(fd)
+            img.save(temp_path, 'JPEG', quality=quality)
+            _REPORT_TEMP_PATHS.append(temp_path)
+            return temp_path
+    except Exception as e:
+        logger.warning(f"Report image resize failed for {image_path}: {e}")
+        return None
+
+
 def _get_report_image_path(photo_path: Optional[str], thumbnail_path: Optional[str]) -> Optional[str]:
-    """Path for add_picture: unchanged for valid formats; MPO→temp JPEG at report time only."""
+    """Path for add_picture: resized for report (max 1200px, quality 82) to keep file size down; MPO→temp JPEG then resize."""
     if not photo_path or not os.path.exists(photo_path):
         return None
     if _is_valid_image(photo_path):
-        return photo_path
+        resized = _resize_image_for_report(photo_path)
+        return resized if resized else photo_path
     try:
         from PIL import Image
         from PIL import ImageOps
@@ -2076,9 +2101,10 @@ def _get_report_image_path(photo_path: Optional[str], thumbnail_path: Optional[s
             img = ImageOps.exif_transpose(img)
             if img.mode not in ('RGB', 'L'):
                 img = img.convert('RGB')
+            img.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
             fd, temp_path = tempfile.mkstemp(suffix='.jpg')
             os.close(fd)
-            img.save(temp_path, 'JPEG', quality=90)
+            img.save(temp_path, 'JPEG', quality=82)
             _REPORT_TEMP_PATHS.append(temp_path)
             return temp_path
     except Exception:
