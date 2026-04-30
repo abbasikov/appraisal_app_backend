@@ -1,18 +1,231 @@
 import os
+import re
 import shutil
 import tempfile
-from typing import List, Optional
-from datetime import datetime
+from typing import List, Optional, Tuple, Union
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
-from PIL import Image, ExifTags, ImageOps
-from PIL.ExifTags import TAGS
+from sqlalchemy import func
+from PIL import Image, ImageOps
+from PIL.ExifTags import TAGS as EXIF_TAG_NAMES
 
 from app.models.photo import Photo
 from app.models.activity_log import ActivityLog
 from app.services.dropbox_service import DropboxService
 
+
+def _exif_datetime_tag_order() -> Tuple[int, ...]:
+    wanted = ('DateTimeOriginal', 'DateTime', 'DateTimeDigitized')
+    ids: List[int] = []
+    for name in wanted:
+        tid = next((k for k, v in EXIF_TAG_NAMES.items() if v == name), None)
+        if tid is not None:
+            ids.append(tid)
+    return tuple(ids)
+
+
+_EXIF_DATE_TAG_IDS: Tuple[int, ...] = _exif_datetime_tag_order()
+
+
 class PhotoService:
     
+    @staticmethod
+    def photo_sort_coalesce():
+        """SQL expression used everywhere photos are ordered chronologically."""
+        return func.coalesce(Photo.sort_timestamp, Photo.exif_date, Photo.created_at)
+
+    @staticmethod
+    def _ensure_utc(dt: datetime) -> datetime:
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    @staticmethod
+    def parse_dropbox_modified(iso_val: Optional[str]) -> Optional[datetime]:
+        if not iso_val or not isinstance(iso_val, str):
+            return None
+        s = iso_val.strip()
+        if not s:
+            return None
+        if s.endswith('Z'):
+            s = s[:-1] + '+00:00'
+        try:
+            return PhotoService._ensure_utc(datetime.fromisoformat(s))
+        except ValueError:
+            return None
+
+    @staticmethod
+    def parse_date_from_filename(filename: str) -> Optional[datetime]:
+        if not filename:
+            return None
+        stem = os.path.splitext(os.path.basename(filename))[0].strip()
+        formats = ('Photo %b %d %Y, %I %M %S %p',)
+        for fmt in formats:
+            try:
+                dt = datetime.strptime(stem, fmt)
+                return PhotoService._ensure_utc(dt)
+            except ValueError:
+                continue
+        m = re.fullmatch(r'(\d{4})-(\d{2})-(\d{2})-(\d{2})h(\d{2})m(\d{2})(?:_\d+)?', stem)
+        if not m:
+            m = re.fullmatch(r'(\d{4})-(\d{2})-(\d{2})-(\d{2})h(\d{2})m(\d{2})\.\d+', stem)
+        if m:
+            y, mo, d, h, mi, sec = map(int, m.groups()[:6])
+            return PhotoService._ensure_utc(datetime(y, mo, d, h, mi, sec))
+        return None
+
+    @staticmethod
+    def compute_sort_timestamp(
+        exif_date: Optional[datetime],
+        original_filename: str,
+        dropbox_server_modified: Optional[datetime],
+        ingest_fallback: Optional[datetime],
+    ) -> datetime:
+        """Deterministic ordering: EXIF date → parsed filename → Dropbox modified → ingest time."""
+        if exif_date:
+            return PhotoService._ensure_utc(exif_date)
+        fd = PhotoService.parse_date_from_filename(original_filename)
+        if fd:
+            return fd
+        if dropbox_server_modified:
+            return PhotoService._ensure_utc(dropbox_server_modified)
+        if ingest_fallback:
+            return PhotoService._ensure_utc(ingest_fallback)
+        return datetime.now(timezone.utc)
+
+    @staticmethod
+    def _coerce_exif_date_text(val: Union[str, bytes]) -> Optional[str]:
+        if val is None:
+            return None
+        if isinstance(val, bytes):
+            val = val.decode('utf-8', errors='ignore').strip().strip('\x00')
+        else:
+            val = str(val).strip().strip('\x00')
+        return val if val else None
+
+    @staticmethod
+    def _datetime_from_exif_string(date_str: str) -> Optional[datetime]:
+        for fmt in ("%Y:%m:%d %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y:%m:%d %H-%M-%S"):
+            try:
+                return datetime.strptime(date_str, fmt)
+            except ValueError:
+                continue
+        return None
+
+    @staticmethod
+    def _exif_date_from_flat_mapping(mapping) -> Optional[datetime]:
+        if not mapping:
+            return None
+        getter = getattr(mapping, 'get', None)
+        for tid in _EXIF_DATE_TAG_IDS:
+            raw = getter(tid) if callable(getter) else None
+            if raw is None:
+                try:
+                    raw = mapping[tid]
+                except (KeyError, TypeError, IndexError):
+                    continue
+            text = PhotoService._coerce_exif_date_text(raw)
+            if not text:
+                continue
+            parsed = PhotoService._datetime_from_exif_string(text)
+            if parsed:
+                return parsed
+        return None
+
+    @staticmethod
+    def _jpeg_exif_bytes_orientation_normal(img: Image.Image) -> Optional[bytes]:
+        """AFTER exif_transpose: pixels are upright; Orientation must be 1 so viewers do not rotate again."""
+        try:
+            ex = img.getexif()
+            if not ex:
+                return None
+            try:
+                ex[274] = 1  # Orientation: horizontal (normal)
+            except Exception:
+                pass
+            out = ex.tobytes()
+            return out if out and len(out) >= 8 else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def canonicalize_imported_image(image_path: str) -> None:
+        """Apply EXIF transpose to pixels, then save metadata consistent with upright pixels (JPEG: Orientation=1).
+        Handles MPO, JPEG, PNG, BMP, TIFF. Skips GIF (palette/animation)."""
+        try:
+            ext = os.path.splitext(image_path)[1].lower()
+            with Image.open(image_path) as img:
+                fmt = getattr(img, 'format', None)
+                if fmt == 'GIF' or ext == '.gif':
+                    return
+                if getattr(img, 'n_frames', 1) > 1:
+                    return
+                img.seek(0)
+                img.load()
+                img = ImageOps.exif_transpose(img)
+
+                as_jpeg = ext in ('.jpg', '.jpeg') or fmt == 'MPO'
+                if as_jpeg:
+                    if img.mode not in ('RGB', 'L'):
+                        img = img.convert('RGB')
+                    exout = PhotoService._jpeg_exif_bytes_orientation_normal(img)
+                    fd, temp_path = tempfile.mkstemp(suffix='.jpg')
+                    os.close(fd)
+                    try:
+                        try:
+                            if exout:
+                                img.save(temp_path, 'JPEG', quality=92, exif=exout)
+                            else:
+                                img.save(temp_path, 'JPEG', quality=92)
+                        except Exception:
+                            img.save(temp_path, 'JPEG', quality=92)
+                        os.replace(temp_path, image_path)
+                    finally:
+                        if os.path.exists(temp_path):
+                            try:
+                                os.remove(temp_path)
+                            except OSError:
+                                pass
+                    return
+
+                if ext == '.png' or fmt == 'PNG':
+                    fd, temp_path = tempfile.mkstemp(suffix='.png')
+                    os.close(fd)
+                    try:
+                        if img.mode in ('RGBA', 'LA', 'P') or img.mode == 'RGB':
+                            img.save(temp_path, 'PNG', optimize=True)
+                        else:
+                            img.convert('RGB').save(temp_path, 'PNG', optimize=True)
+                        os.replace(temp_path, image_path)
+                    finally:
+                        if os.path.exists(temp_path):
+                            try:
+                                os.remove(temp_path)
+                            except OSError:
+                                pass
+                    return
+
+                pil_save = {
+                    '.bmp': 'BMP',
+                    '.tif': 'TIFF',
+                    '.tiff': 'TIFF',
+                }.get(ext)
+                if pil_save:
+                    fd, temp_path = tempfile.mkstemp(suffix=ext)
+                    os.close(fd)
+                    try:
+                        im2 = img.convert('RGB') if img.mode not in ('RGB', 'L') else img
+                        im2.save(temp_path, pil_save)
+                        os.replace(temp_path, image_path)
+                    finally:
+                        if os.path.exists(temp_path):
+                            try:
+                                os.remove(temp_path)
+                            except OSError:
+                                pass
+        except Exception as e:
+            print(f"⚠️ Orientation canonicalize skipped for {os.path.basename(image_path)}: {e}")
+
     @staticmethod
     def import_photos_from_dropbox_batched(db: Session, project_id: int, dropbox_links: List[str], user_id: int, batch_size: int = 10) -> dict:
         """Import photos from Dropbox in batches to avoid timeouts"""
@@ -66,14 +279,16 @@ class PhotoService:
                     success = dropbox_service.download_file(file_info['path'], local_path, file_info['source_link'])
                 
                 if success:
-                    # Convert MPO to JPEG at ingest so reports/thumbnails use one format
-                    PhotoService.convert_mpo_to_jpeg_if_needed(local_path)
-                    # Process image
+                    drop_mod = PhotoService.parse_dropbox_modified(file_info.get('modified'))
+                    ingest_fallback = datetime.now(timezone.utc)
+                    PhotoService.canonicalize_imported_image(local_path)
                     exif_date = PhotoService.extract_exif_date(local_path)
+                    sort_timestamp = PhotoService.compute_sort_timestamp(
+                        exif_date, file_info['name'], drop_mod, ingest_fallback
+                    )
                     width, height = PhotoService.get_image_dimensions(local_path)
                     thumbnail_path = PhotoService.create_thumbnail(local_path, project_id)
-                    
-                    # Create photo record
+
                     photo = Photo(
                         project_id=project_id,
                         original_filename=file_info['name'],
@@ -84,6 +299,8 @@ class PhotoService:
                         width=width,
                         height=height,
                         exif_date=exif_date,
+                        sort_timestamp=sort_timestamp,
+                        dropbox_server_modified=drop_mod,
                         sort_order=len(imported_photos) + 1,
                         dropbox_file_id=file_info.get('id'),
                         dropbox_folder_path=file_info.get('folder_path', '/'),
@@ -196,18 +413,16 @@ class PhotoService:
                         success = dropbox_service.download_file(file_info['path'], local_path, link)
                     
                     if success:
-                        # Convert MPO to JPEG at ingest so reports/thumbnails use one format
-                        PhotoService.convert_mpo_to_jpeg_if_needed(local_path)
-                        # Extract EXIF data with improved method
+                        drop_mod = PhotoService.parse_dropbox_modified(file_info.get('modified'))
+                        ingest_fallback = datetime.now(timezone.utc)
+                        PhotoService.canonicalize_imported_image(local_path)
                         exif_date = PhotoService.extract_exif_date(local_path)
-                        
-                        # Get image dimensions
+                        sort_timestamp = PhotoService.compute_sort_timestamp(
+                            exif_date, file_info['name'], drop_mod, ingest_fallback
+                        )
                         width, height = PhotoService.get_image_dimensions(local_path)
-                        
-                        # Generate thumbnail with unique naming
                         thumbnail_path = PhotoService.create_thumbnail(local_path, project_id)
-                        
-                        # Create photo record with folder tracking
+
                         photo = Photo(
                             project_id=project_id,
                             original_filename=file_info['name'],
@@ -218,6 +433,8 @@ class PhotoService:
                             width=width,
                             height=height,
                             exif_date=exif_date,
+                            sort_timestamp=sort_timestamp,
+                            dropbox_server_modified=drop_mod,
                             sort_order=len(imported_photos) + 1,
                             dropbox_file_id=file_info.get('id'),
                             dropbox_folder_path=file_info.get('folder_path', '/'),
@@ -232,10 +449,7 @@ class PhotoService:
                         print(f"❌ {error_msg}")
                         errors.append(error_msg)
             
-            # Sort imported photos chronologically by EXIF date
-            imported_photos.sort(key=lambda p: p.exif_date or datetime.min)
-            
-            # Update sort_order based on chronological order
+            imported_photos.sort(key=lambda p: (p.sort_timestamp, p.id))
             for i, photo in enumerate(imported_photos):
                 photo.sort_order = i + 1
             
@@ -280,43 +494,24 @@ class PhotoService:
     
     @staticmethod
     def extract_exif_date(image_path: str) -> Optional[datetime]:
-        """Extract date taken from EXIF data using modern PIL approach"""
+        """Extract date taken from EXIF (IFD0 + Exif sub-IFD); handles bytes values."""
         try:
             with Image.open(image_path) as image:
-                # Get EXIF data using the modern approach
-                exif_dict = image.getexif()
-                
-                if exif_dict:
-                    # Try different EXIF date tags in order of preference
-                    date_tags = [
-                        'DateTimeOriginal',      # Camera's date when photo was taken
-                        'DateTime',              # File modification date
-                        'DateTimeDigitized'      # Date when photo was digitized
-                    ]
-                    
-                    for tag_name in date_tags:
-                        # Get the tag ID for the tag name
-                        tag_id = None
-                        for tag, name in ExifTags.TAGS.items():
-                            if name == tag_name:
-                                tag_id = tag
-                                break
-                        
-                        if tag_id and tag_id in exif_dict:
-                            date_str = exif_dict[tag_id]
-                            try:
-                                # Parse the EXIF date format: "YYYY:MM:DD HH:MM:SS"
-                                return datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
-                            except ValueError:
-                                # Try alternative format
-                                try:
-                                    return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-                                except ValueError:
-                                    continue
-                
+                exif_top = image.getexif()
+                dt = PhotoService._exif_date_from_flat_mapping(exif_top)
+                if dt:
+                    return dt
+                try:
+                    from PIL.ExifTags import IFD
+                    if exif_top:
+                        sub = exif_top.get_ifd(IFD.Exif)
+                        dt = PhotoService._exif_date_from_flat_mapping(sub)
+                        if dt:
+                            return dt
+                except Exception:
+                    pass
                 print(f"⚠️  No EXIF date found for: {os.path.basename(image_path)}")
                 return None
-                
         except Exception as e:
             print(f"❌ Error extracting EXIF date from {os.path.basename(image_path)}: {e}")
             return None
@@ -330,33 +525,6 @@ class PhotoService:
         except Exception as e:
             print(f"❌ Error getting dimensions for {os.path.basename(image_path)}: {e}")
             return None, None
-    
-    @staticmethod
-    def convert_mpo_to_jpeg_if_needed(image_path: str) -> None:
-        """If the image is MPO (e.g. iPhone .jpg with MPF metadata), convert to JPEG in-place.
-        Keeps the same path so DB and reports use it without further conversion."""
-        try:
-            with Image.open(image_path) as img:
-                if getattr(img, 'format', None) != 'MPO':
-                    return
-                img.seek(0)
-                img.load()
-                img = ImageOps.exif_transpose(img)
-                if img.mode not in ('RGB', 'L'):
-                    img = img.convert('RGB')
-                fd, temp_path = tempfile.mkstemp(suffix='.jpg')
-                os.close(fd)
-                try:
-                    img.save(temp_path, 'JPEG', quality=90)
-                    os.replace(temp_path, image_path)
-                finally:
-                    if os.path.exists(temp_path):
-                        try:
-                            os.remove(temp_path)
-                        except OSError:
-                            pass
-        except Exception as e:
-            print(f"⚠️ MPO conversion skipped for {os.path.basename(image_path)}: {e}")
     
     @staticmethod
     def create_thumbnail(image_path: str, project_id: int) -> Optional[str]:
@@ -433,12 +601,12 @@ class PhotoService:
     
     @staticmethod
     def get_photos_by_project(db: Session, project_id: int, skip: int = 0, limit: int = None) -> List[Photo]:
-        """Get photos for a project, ordered by EXIF date (chronological order) with pagination"""
+        """Get photos for a project, ordered chronologically (sort_timestamp → EXIF → created_at) with pagination"""
         try:
             query = db.query(Photo).filter(
                 Photo.project_id == project_id,
                 Photo.is_deleted == False
-            ).order_by(Photo.exif_date.asc().nullslast(), Photo.id.asc())
+            ).order_by(PhotoService.photo_sort_coalesce().asc(), Photo.id.asc())
             
             if limit is not None:
                 query = query.offset(skip).limit(limit)

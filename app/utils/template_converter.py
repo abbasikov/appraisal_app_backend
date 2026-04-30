@@ -2062,18 +2062,32 @@ def _is_valid_image(image_path: str) -> bool:
 
 def _resize_image_for_report(image_path: str, max_size: int = 1200, quality: int = 82) -> Optional[str]:
     """Resize image to max_size on longest side and save as JPEG to a temp file for report embedding.
-    Returns temp path (appended to _REPORT_TEMP_PATHS) or original path if already small. Skips resize when max(w,h) <= max_size."""
+    Always writes transposed, pixel-upright JPEG so Word/embedders ignore EXIF inconsistencies on source files."""
     try:
         from PIL import Image
         from PIL import ImageOps
         with Image.open(image_path) as img:
+            img.load()
             img = ImageOps.exif_transpose(img)
             w, h = img.size
-            if max(w, h) <= max_size:
-                return image_path
-            if img.mode not in ('RGB', 'L'):
+            if img.mode in ('RGBA', 'LA'):
+                rgba = img.convert('RGBA')
+                base = Image.new('RGB', rgba.size, (255, 255, 255))
+                base.paste(rgba, mask=rgba.split()[3])
+                img = base
+            elif img.mode == 'P':
+                rgba = img.convert('RGBA')
+                if rgba.split()[3].getbbox():
+                    base = Image.new('RGB', rgba.size, (255, 255, 255))
+                    base.paste(rgba, mask=rgba.split()[3])
+                    img = base
+                else:
+                    img = rgba.convert('RGB')
+            elif img.mode not in ('RGB', 'L'):
                 img = img.convert('RGB')
-            img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+            if max(w, h) > max_size:
+                img = img.copy()
+                img.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
             fd, temp_path = tempfile.mkstemp(suffix='.jpg')
             os.close(fd)
             img.save(temp_path, 'JPEG', quality=quality)

@@ -15,6 +15,7 @@ from app.utils.template_converter import (
     ReportGenerationError
 )
 from app.core.config import settings
+from app.services.photo_service import PhotoService
 import logging
 
 logger = logging.getLogger(__name__)
@@ -130,13 +131,11 @@ class TemplateService:
                 joinedload(AppraisalItem.photo)
             ).outerjoin(Photo, AppraisalItem.photo_id == Photo.id).filter(
                 AppraisalItem.project_id == project_id
-            ).order_by(Photo.exif_date.asc().nullslast(), AppraisalItem.sort_order.asc()).all()
-            
-            # Get all photos for this project (chronological by EXIF date)
+            ).order_by(PhotoService.photo_sort_coalesce().asc().nullslast(), AppraisalItem.sort_order.asc()).all()
             all_project_photos = db.query(Photo).filter(
                 Photo.project_id == project_id,
                 Photo.is_deleted == False
-            ).order_by(Photo.exif_date.asc().nullslast(), Photo.id.asc()).all()
+            ).order_by(PhotoService.photo_sort_coalesce().asc(), Photo.id.asc()).all()
             
             # Calculate total value from items
             total_value = sum(item.appraised_value or 0 for item in appraisal_items)

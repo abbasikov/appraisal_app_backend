@@ -16,6 +16,8 @@ class Photo(Base):
     width = Column(Integer)
     height = Column(Integer)
     exif_date = Column(DateTime(timezone=True))
+    sort_timestamp = Column(DateTime(timezone=True))  # stable ordering (EXIF→filename→Dropbox modified→created)
+    dropbox_server_modified = Column(DateTime(timezone=True))  # Dropbox server_modified when available
     sort_order = Column(Integer, default=0)
     is_deleted = Column(Boolean, default=False)
     dropbox_file_id = Column(String)

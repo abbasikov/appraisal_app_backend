@@ -6,6 +6,7 @@ from app.models.appraisal_item import AppraisalItem
 from app.models.photo import Photo
 from app.models.project import Project
 from app.schemas.appraisal_item import AppraisalItemCreate, AppraisalItemUpdate, AppraisalItemReorder
+from app.services.photo_service import PhotoService
 
 class AppraisalService:
     
@@ -25,7 +26,7 @@ class AppraisalService:
             photos = db.query(Photo).filter(
                 Photo.project_id == project_id,
                 Photo.is_deleted == False
-            ).order_by(Photo.sort_order.asc()).all()
+            ).order_by(PhotoService.photo_sort_coalesce().asc(), Photo.id.asc()).all()
             
             # Get existing items to avoid duplicates
             existing_photo_ids = set(
@@ -76,7 +77,7 @@ class AppraisalService:
                 Photo, AppraisalItem.photo_id == Photo.id
             ).filter(
                 AppraisalItem.project_id == project_id
-            ).order_by(Photo.exif_date.asc().nullslast(), AppraisalItem.sort_order.asc()).all()
+            ).order_by(PhotoService.photo_sort_coalesce().asc().nullslast(), AppraisalItem.sort_order.asc()).all()
             
             result = []
             line_number = 1  # Sequential numbering
