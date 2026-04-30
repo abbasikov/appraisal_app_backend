@@ -12,6 +12,8 @@ class PhotoResponse(BaseModel):
     width: Optional[int]
     height: Optional[int]
     exif_date: Optional[datetime]
+    sort_timestamp: Optional[datetime] = None
+    dropbox_server_modified: Optional[datetime] = None
     sort_order: int
     dropbox_folder_path: Optional[str] = None
     source_folder_link: Optional[str] = None
