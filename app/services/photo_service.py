@@ -723,21 +723,19 @@ class PhotoService:
                 AppraisalItem.photo_id == photo_id
             ).delete(synchronize_session=False)
             
-            # Soft delete the photo
             photo.is_deleted = True
-            db.commit()
-            
-            # Log activity
-            activity = ActivityLog(
-                user_id=user_id,
-                action=f"Deleted photo: {photo.original_filename}",
-                details={
-                    "photo_id": photo_id, 
-                    "project_id": photo.project_id,
-                    "deleted_appraisal_items": deleted_items
-                }
+
+            db.add(
+                ActivityLog(
+                    user_id=user_id,
+                    action=f"Deleted photo: {photo.original_filename}",
+                    details={
+                        "photo_id": photo_id,
+                        "project_id": photo.project_id,
+                        "deleted_appraisal_items": deleted_items,
+                    },
+                )
             )
-            db.add(activity)
             db.commit()
             
             return True

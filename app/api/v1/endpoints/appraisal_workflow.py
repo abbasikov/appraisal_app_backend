@@ -142,7 +142,9 @@ async def delete_appraisal_item(
 ):
     """Delete an appraisal item"""
     try:
-        success = AppraisalService.delete_appraisal_item(db, item_id, project_id)
+        success = AppraisalService.delete_appraisal_item(
+            db, item_id, project_id, current_user.id
+        )
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
