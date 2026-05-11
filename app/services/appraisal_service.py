@@ -202,25 +202,38 @@ class AppraisalService:
             raise e
     
     @staticmethod
-    def delete_appraisal_item(db: Session, item_id: int, project_id: int) -> bool:
+    def delete_appraisal_item(db: Session, item_id: int, project_id: int, user_id: int) -> bool:
         """Delete an appraisal item"""
         try:
             item = db.query(AppraisalItem).filter(
                 AppraisalItem.id == item_id,
                 AppraisalItem.project_id == project_id
             ).first()
-            
+
             if not item:
                 return False
             
+            if item.photo_id is not None:
+                photo = db.query(Photo).filter(Photo.id == item.photo_id).first()
+                if photo and photo.project_id == project_id:
+                    if not PhotoService.delete_photo(db, item.photo_id, user_id):
+                        raise RuntimeError(
+                            "Failed to delete linked photo"
+                        )
+                    AppraisalService._touch_project_updated_at(db, project_id)
+                    return True
+
+                db.delete(item)
+                db.commit()
+                AppraisalService._touch_project_updated_at(db, project_id)
+                return True
+            
             db.delete(item)
             db.commit()
-            
-            # Update project's updated_at to reflect this change
             AppraisalService._touch_project_updated_at(db, project_id)
-            
+
             return True
-            
+
         except Exception as e:
             db.rollback()
             raise e
