@@ -131,7 +131,7 @@ class TemplateService:
                 joinedload(AppraisalItem.photo)
             ).outerjoin(Photo, AppraisalItem.photo_id == Photo.id).filter(
                 AppraisalItem.project_id == project_id
-            ).order_by(PhotoService.photo_sort_coalesce().asc().nullslast(), AppraisalItem.sort_order.asc()).all()
+            ).order_by(AppraisalItem.sort_order.asc(), PhotoService.photo_sort_coalesce().asc().nullslast(), AppraisalItem.id.asc()).all()
             all_project_photos = db.query(Photo).filter(
                 Photo.project_id == project_id,
                 Photo.is_deleted == False
